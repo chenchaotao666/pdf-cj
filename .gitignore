@@ -1,0 +1,32 @@
+# Cangjie build artifacts
+target/
+*.cjo
+*.a
+*.so
+*.dylib
+
+# Cache
+.cache/
+
+# Lock files
+cjpm.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated PDFs (from examples)
+*.pdf
+
+# Logs
+*.log
+
+# reference
+reference/
