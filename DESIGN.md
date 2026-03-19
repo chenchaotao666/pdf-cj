@@ -137,7 +137,7 @@ pdf-cj/
 │
 ├── examples/                   # 示例代码
 │   ├── hello_world.cj
-│   ├── table_example.cj
+│   ├── example_table.cj
 │   └── merge_pdf.cj
 │
 └── cjpm.toml                   # 项目配置

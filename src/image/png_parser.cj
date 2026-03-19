@@ -18,6 +18,7 @@ public class PngInfo {
     public var filterMethod: UInt8 = 0
     public var interlaceMethod: UInt8 = 0
     public var idatData: Array<UInt8> = Array<UInt8>(0, repeat: UInt8(0))
+    public var palette: Array<UInt8> = Array<UInt8>(0, repeat: UInt8(0))  // RGB调色板数据
 
     public init() {}
 }
@@ -42,8 +43,9 @@ public class PngParser {
         let info = PngInfo()
         var offset: Int64 = 8  // 跳过PNG签名
 
-        // 收集所有IDAT数据
+        // 收集所有IDAT数据和调色板
         var idatList = ArrayList<UInt8>()
+        var paletteList = ArrayList<UInt8>()
 
         while (offset < data.size - 12) {
             // 读取块长度（大端序）
@@ -58,6 +60,15 @@ public class PngParser {
                 // 解析IHDR
                 if (!parseIHDR(data, offset, info)) {
                     return None
+                }
+            } else if (chunkType == "PLTE") {
+                // 解析调色板（索引色必需）
+                var i: Int64 = 0
+                while (i < Int64(length)) {
+                    if (offset + i < data.size) {
+                        paletteList.add(data[offset + i])
+                    }
+                    i += 1
                 }
             } else if (chunkType == "IDAT") {
                 // 收集IDAT数据
@@ -77,8 +88,9 @@ public class PngParser {
             offset += Int64(length) + 4
         }
 
-        // 转换IDAT列表为数组
+        // 转换IDAT列表和调色板为数组
         info.idatData = idatList.toArray()
+        info.palette = paletteList.toArray()
 
         Some(info)
     }

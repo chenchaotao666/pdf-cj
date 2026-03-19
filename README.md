@@ -215,9 +215,9 @@ let compressed = FlateEncoder.encode(data)
 项目包含四个完整示例：
 
 1. **hello_world.cj** - 最简单的入门示例（含中英文混排）
-2. **chinese_example.cj** - 中文字体使用示例 **[NEW]**
-3. **table_example.cj** - 表格功能深入演示
-4. **comprehensive_example.cj** - 所有功能综合展示
+2. **example_chinese.cj** - 中文字体使用示例 **[NEW]**
+3. **example_table.cj** - 表格功能深入演示
+4. **example_comprehensive.cj** - 所有功能综合展示
 
 运行示例：
 
@@ -227,9 +227,9 @@ cjpm build
 
 # 运行示例（使用便捷脚本）
 ./run_example.sh hello_world
-./run_example.sh chinese_example
-./run_example.sh table_example
-./run_example.sh comprehensive_example
+./run_example.sh example_chinese
+./run_example.sh example_table
+./run_example.sh example_comprehensive
 ```
 
 详细说明请查看 [examples/README.md](examples/README.md)
@@ -250,8 +250,8 @@ pdf-cj/
 │   └── util/               # 工具类（PageSize、Rectangle）
 ├── examples/               # 示例程序
 │   ├── hello_world.cj
-│   ├── table_example.cj
-│   ├── comprehensive_example.cj
+│   ├── example_table.cj
+│   ├── example_comprehensive.cj
 │   └── README.md
 ├── cjpm.toml              # 项目配置
 ├── DESIGN.md              # API 设计文档

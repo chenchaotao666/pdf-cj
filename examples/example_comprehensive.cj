@@ -10,7 +10,7 @@ main() {
     println("开始创建 PDF 文档...")
 
     // 1. 创建文档和输出流
-    let output = File(Path("comprehensive_demo.pdf"), OpenMode.Write)
+    let output = File(Path("example_comprehensive.pdf"), OpenMode.Write)
     let document = Document(PageSize.A4, 50.0, 50.0, 50.0, 50.0)
     let writer = PdfWriter.getInstance(document, output)
 
@@ -200,35 +200,148 @@ main() {
     chapter3Title.setSpacingAfter(20.0)
     document.add(chapter3Title)
 
-    // 11. 插入图片（各种缩放方式）
-    let imagePara = Paragraph("11.1 Debian Logo - 原始大小", normalFont)
-    imagePara.setSpacingAfter(10.0)
-    document.add(imagePara)
+    let introImagePara = Paragraph("PDF-CJ 支持 PNG 和 JPEG 格式的图片，下面展示不同格式和缩放方式。", normalFont)
+    introImagePara.setSpacingAfter(20.0)
+    document.add(introImagePara)
 
-    println("正在加载图片...")
-    let image1 = Image.getInstance("debian-logo.png")
-    image1.setAlignment(Alignment.Center)
-    document.add(image1)
+    // 计算可用页面宽度（A4 纸张宽度 595，减去左右边距各 50）
+    let availableWidth = 595.0 - 50.0 - 50.0  // 495 points
 
-    let imagePara2 = Paragraph("11.2 Debian Logo - 缩放到 50%", normalFont)
-    imagePara2.setSpacingBefore(20.0)
-    imagePara2.setSpacingAfter(10.0)
-    document.add(imagePara2)
+    // 11.1 PNG 图片 - 山景
+    let pngPara = Paragraph("11.1 PNG 格式图片 - 山景 (1280×720)", boldFont)
+    pngPara.setSpacingAfter(10.0)
+    document.add(pngPara)
 
-    let image2 = Image.getInstance("debian-logo.png")
-    image2.scalePercent(50.0)
-    image2.setAlignment(Alignment.Center)
-    document.add(image2)
+    let pngDescPara = Paragraph("原始尺寸缩放至页面宽度的 80%", normalFont)
+    pngDescPara.setSpacingAfter(5.0)
+    document.add(pngDescPara)
 
-    let imagePara3 = Paragraph("11.3 Debian Logo - 固定 100x100 像素", normalFont)
-    imagePara3.setSpacingBefore(20.0)
-    imagePara3.setSpacingAfter(10.0)
-    document.add(imagePara3)
+    let mountainImage = Image.getInstance("images/mountain.png")
+    mountainImage.scaleToFit(Float32(availableWidth * 0.8), 300.0)
+    mountainImage.setAlignment(Alignment.Center)
+    document.add(mountainImage)
 
-    let image3 = Image.getInstance("debian-logo.png")
-    image3.scaleAbsolute(100.0, 100.0)
-    image3.setAlignment(Alignment.Center)
-    document.add(image3)
+    // 11.2 JPEG 图片 - 河流
+    document.newPage()
+    let jpegPara = Paragraph("11.2 JPG 格式图片 - 河流 (1920×1200)", boldFont)
+    jpegPara.setSpacingAfter(10.0)
+    document.add(jpegPara)
+
+    let jpegDescPara = Paragraph("高分辨率照片，缩放至适合页面", normalFont)
+    jpegDescPara.setSpacingAfter(5.0)
+    document.add(jpegDescPara)
+
+    let riverImage = Image.getInstance("images/river.jpg")
+    riverImage.scaleToFit(Float32(availableWidth * 0.9), 400.0)
+    riverImage.setAlignment(Alignment.Center)
+    document.add(riverImage)
+
+    // 11.3 JPEG 图片 - 节点图 (nodes)
+    let nodesPara = Paragraph("11.3 JPEG 格式图片 - 节点图 (500×500)", boldFont)
+    nodesPara.setSpacingBefore(20.0)
+    nodesPara.setSpacingAfter(10.0)
+    document.add(nodesPara)
+
+    let nodesDescPara = Paragraph("正方形图片，展示网络节点关系", normalFont)
+    nodesDescPara.setSpacingAfter(5.0)
+    document.add(nodesDescPara)
+
+    let nodesImage = Image.getInstance("images/nodes.jpeg")
+    nodesImage.scaleToFit(300.0, 300.0)
+    nodesImage.setAlignment(Alignment.Center)
+    document.add(nodesImage)
+
+    // 11.4 图片缩放对比
+    document.newPage()
+    let scalePara = Paragraph("11.4 图片缩放方式对比（使用 nodes.jpeg）", boldFont)
+    scalePara.setSpacingAfter(15.0)
+    document.add(scalePara)
+
+    // 方式1：百分比缩放
+    let scale1Para = Paragraph("方式 1：百分比缩放 (40%)", normalFont)
+    document.add(scale1Para)
+    let scaleImage1 = Image.getInstance("images/nodes.jpeg")
+    scaleImage1.scalePercent(40.0)
+    scaleImage1.setAlignment(Alignment.Center)
+    document.add(scaleImage1)
+
+    // 方式2：固定宽度
+    let scale2Para = Paragraph("方式 2：固定宽度 (400×225)", normalFont)
+    scale2Para.setSpacingBefore(15.0)
+    document.add(scale2Para)
+    let scaleImage2 = Image.getInstance("images/nodes.jpeg")
+    scaleImage2.scaleAbsolute(400.0, 225.0)
+    scaleImage2.setAlignment(Alignment.Center)
+    document.add(scaleImage2)
+
+    // 方式3：等比缩放至最大尺寸
+    let scale3Para = Paragraph("方式 3：适应最大尺寸 (保持宽高比)", normalFont)
+    scale3Para.setSpacingBefore(15.0)
+    document.add(scale3Para)
+    let scaleImage3 = Image.getInstance("images/nodes.jpeg")
+    scaleImage3.scaleToFit(350.0, 200.0)
+    scaleImage3.setAlignment(Alignment.Center)
+    document.add(scaleImage3)
+
+    // 11.4 图片对齐方式
+    document.newPage()
+    let alignPara = Paragraph("11.5 图片对齐方式", boldFont)
+    alignPara.setSpacingAfter(15.0)
+    document.add(alignPara)
+
+    // 左对齐
+    let leftAlignPara = Paragraph("左对齐：", normalFont)
+    document.add(leftAlignPara)
+    let leftImage = Image.getInstance("images/nodes.jpeg")
+    leftImage.scalePercent(15.0)
+    leftImage.setAlignment(Alignment.Left)
+    document.add(leftImage)
+
+    // 居中对齐
+    let centerAlignPara = Paragraph("居中对齐：", normalFont)
+    centerAlignPara.setSpacingBefore(10.0)
+    document.add(centerAlignPara)
+    let centerImage = Image.getInstance("images/nodes.jpeg")
+    centerImage.scalePercent(15.0)
+    centerImage.setAlignment(Alignment.Center)
+    document.add(centerImage)
+
+    // 右对齐
+    let rightAlignPara = Paragraph("右对齐：", normalFont)
+    rightAlignPara.setSpacingBefore(10.0)
+    document.add(rightAlignPara)
+    let rightImage = Image.getInstance("images/nodes.jpeg")
+    rightImage.scalePercent(15.0)
+    rightImage.setAlignment(Alignment.Right)
+    document.add(rightImage)
+
+    // 11.6 GIF 和 BMP 格式支持
+    document.newPage()
+    let gifBmpPara = Paragraph("11.6 GIF 和 BMP 格式支持", boldFont)
+    gifBmpPara.setSpacingAfter(15.0)
+    document.add(gifBmpPara)
+
+    // GIF 图片
+    let gifDescPara = Paragraph("GIF 格式（40x40 像素）：", normalFont)
+    gifDescPara.setSpacingAfter(5.0)
+    document.add(gifDescPara)
+    let gifNote = Paragraph("注意：当前 GIF 支持适用于简单的静态 GIF，复杂动画 GIF 建议转换为 PNG", normalFont)
+    gifNote.setSpacingAfter(10.0)
+    document.add(gifNote)
+    let gifImage = Image.getInstance("images/square.gif")
+    gifImage.scalePercent(500.0)  // 放大到 200x200
+    gifImage.setAlignment(Alignment.Center)
+    document.add(gifImage)
+
+    // BMP 图片
+    let bmpPara = Paragraph("BMP 格式（448x448 像素，16位色深）：", normalFont)
+    bmpPara.setSpacingBefore(20.0)
+    bmpPara.setSpacingAfter(5.0)
+    document.add(bmpPara)
+    let bmpImage = Image.getInstance("images/guest.bmp")
+    bmpImage.scalePercent(50.0)  // 缩小到 224x224
+    bmpImage.setAlignment(Alignment.Center)
+    document.add(bmpImage)
 
     // ===== 第四章：编码功能 =====
 
@@ -328,7 +441,7 @@ main() {
         ["文本处理", "✓ 多种字体和样式"],
         ["段落控制", "✓ 对齐、缩进、间距"],
         ["表格功能", "✓ 复杂布局、跨行列"],
-        ["图片支持", "✓ 多格式、多种缩放"],
+        ["图片支持", "✓ PNG/JPEG/GIF/BMP"],
         ["编码压缩", "✓ Flate、Hex、Base85"],
         ["页面控制", "✓ 页眉页脚、分页"],
         ["颜色支持", "✓ RGB 颜色"],
@@ -361,6 +474,6 @@ main() {
     document.close()
     output.close()
 
-    println("PDF 文档创建完成：comprehensive_demo.pdf")
+    println("PDF 文档创建完成：example_comprehensive.pdf")
     println("✓ 已演示：文本、段落、表格、图片、编码、页眉页脚等功能")
 }

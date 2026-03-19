@@ -14,7 +14,7 @@ import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phras
 import pdf_cj.util.{Rectangle, PageSize, PdfException}
 import pdf_cj.text.{Font, BaseFont, Alignment, TrueTypeFont, Color, Border}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow, VerticalAlignment}
-import pdf_cj.image.{Image, ImageType, PngParser, PngInfo}
+import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser}
 import pdf_cj.codec.FlateEncoder
 import zlib4cj.{Zlib, ZlibType}
 
@@ -451,8 +451,6 @@ public class PdfWriter <: DocListener {
         let imageWidth = image.scaledWidth
         let pageWidth = _pageSize.width - _marginLeft - _marginRight
 
-        println("[PDF Writer] Drawing image: ${imageWidth} x ${imageHeight}")
-
         let imageX = match (image.alignment) {
             case Alignment.Left => _marginLeft
             case Alignment.Center => _marginLeft + (pageWidth - imageWidth) / 2.0
@@ -462,8 +460,6 @@ public class PdfWriter <: DocListener {
 
         // 计算 Y 位置（PDF 坐标系从下往上）
         let imageY = _currentY - imageHeight
-
-        println("[PDF Writer] Position: (${imageX}, ${imageY})")
 
         // 绘制图片
         drawImage(imageName, imageX, imageY, imageWidth, imageHeight)
@@ -495,6 +491,12 @@ public class PdfWriter <: DocListener {
             case ImageType.Png =>
                 // PNG：提取IDAT数据并使用FlateDecode
                 createPngXObject(stream, rawData)
+            case ImageType.Gif =>
+                // GIF：转换为 RGB 数据
+                createGifXObject(stream, rawData)
+            case ImageType.Bmp =>
+                // BMP：转换为 RGB 数据
+                createBmpXObject(stream, rawData)
             case _ =>
                 // 默认处理：尝试作为RGB数据
                 stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
@@ -515,35 +517,26 @@ public class PdfWriter <: DocListener {
                 try {
                     // 解压 IDAT 数据（PNG 使用 ZLIB 格式，不是纯 DEFLATE）
                     let decompressedData = Zlib.uncompress(pngInfo.idatData, wrap: ZlibType.ZLIB)
-                    println("[PNG] ✓ Decompressed: ${decompressedData.size} bytes")
 
                     // 应用PNG滤波器还原
-                    let imageData = applyPngFilters(decompressedData, pngInfo)
-                    println("[PNG] ✓ After filters: ${imageData.size} bytes")
+                    var imageData = applyPngFilters(decompressedData, pngInfo)
 
-                    // 统计颜色
-                    var redCount: Int64 = 0
-                    var i: Int64 = 0
-                    while (i < imageData.size) {
-                        if (imageData[i] > UInt8(100)) {
-                            redCount += 1
-                        }
-                        i += 3
+                    // 如果是索引色，转换为 RGB
+                    if (pngInfo.colorType == UInt8(3) && pngInfo.palette.size > 0) {
+                        imageData = convertIndexedToRGB(imageData, pngInfo.palette)
                     }
-                    println("[PNG] ✓ Red pixels: ${redCount}")
 
                     // 设置颜色空间
                     let colorSpace = match (pngInfo.colorType) {
                         case 0 => "DeviceGray"  // 灰度
                         case 2 => "DeviceRGB"   // RGB
-                        case 3 => "DeviceRGB"   // 索引色（简化为RGB）
+                        case 3 => "DeviceRGB"   // 索引色（已转换为RGB）
                         case 4 => "DeviceGray"  // 灰度+Alpha（简化为灰度）
                         case 6 => "DeviceRGB"   // RGBA（简化为RGB）
                         case _ => "DeviceRGB"
                     }
-                    println("[PNG] ✓ ColorSpace: ${colorSpace}")
                     stream.put(PdfName("ColorSpace"), PdfName(colorSpace))
-                    stream.put(PdfName("BitsPerComponent"), PdfNumber(Int32(pngInfo.bitDepth)))
+                    stream.put(PdfName("BitsPerComponent"), PdfNumber(8))  // 转换后都是8位
 
                     // 添加 Decode 数组（明确指定颜色值范围）
                     // DeviceRGB: [0 1 0 1 0 1] 表示 R、G、B 都是从 0 到 1
@@ -555,41 +548,84 @@ public class PdfWriter <: DocListener {
                     decodeArray.add(PdfNumber(0))
                     decodeArray.add(PdfNumber(1))
                     stream.put(PdfName("Decode"), decodeArray)
-                    println("[PNG] ✓ Added Decode array: [0 1 0 1 0 1]")
 
                     // 重新压缩数据用于 PDF
                     let compressedData = FlateEncoder.encode(imageData)
-                    println("[PNG] ✓ Compressed for PDF: ${compressedData.size} bytes")
-
-                    // 验证压缩数据：尝试解压看看是否正确
-                    let testDecompressed = FlateEncoder.decode(compressedData)
-                    println("[PNG] ✓ Test decompress: ${testDecompressed.size} bytes")
-                    if (testDecompressed.size != imageData.size) {
-                        println("[PNG] ⚠ WARNING: Size mismatch! Original: ${imageData.size}, Decompressed: ${testDecompressed.size}")
-                    }
-                    // 比较前几个字节
-                    var dataMatches = true
-                    var checkCount: Int64 = 0
-                    while (checkCount < 100 && checkCount < imageData.size) {
-                        if (imageData[checkCount] != testDecompressed[checkCount]) {
-                            dataMatches = false
-                            break
-                        }
-                        checkCount += 1
-                    }
-                    if (dataMatches) {
-                        println("[PNG] ✓ Compression verification passed")
-                    } else {
-                        println("[PNG] ❌ WARNING: Compression verification failed!")
-                    }
 
                     stream.put(PdfName.FILTER, PdfName.FLATEDECODE)
                     stream.setContent(compressedData)
-                    println("[PNG] ✓ PNG processing completed successfully")
                 } catch (e: Exception) {
                     // 如果处理失败，回退到简化处理（创建占位图片）
-                    println("[PNG] ❌ ERROR: ${e}")
-                    println("[PNG] Creating placeholder image")
+                    stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
+                    stream.put(PdfName("BitsPerComponent"), PdfNumber(8))
+                    let placeholderData = Array<UInt8>(100, repeat: UInt8(128))
+                    stream.setContent(placeholderData)
+                }
+            case None =>
+                // 解析失败，创建空白图片
+                stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
+                stream.put(PdfName("BitsPerComponent"), PdfNumber(8))
+                let blankData = Array<UInt8>(100, repeat: UInt8(255))
+                stream.setContent(blankData)
+        }
+    }
+
+    /**
+     * 创建 GIF XObject
+     * 将 GIF 转换为 RGB 数据
+     */
+    private func createGifXObject(stream: PdfStream, rawData: Array<UInt8>): Unit {
+        match (GifParser.parse(rawData)) {
+            case Some(gifInfo) =>
+                try {
+                    // 将索引色转换为 RGB
+                    let imageData = GifParser.convertToRGB(gifInfo)
+
+                    stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
+                    stream.put(PdfName("BitsPerComponent"), PdfNumber(8))
+
+                    // 压缩数据用于 PDF
+                    let compressedData = FlateEncoder.encode(imageData)
+
+                    stream.put(PdfName.FILTER, PdfName.FLATEDECODE)
+                    stream.setContent(compressedData)
+                } catch (e: Exception) {
+                    // 如果处理失败，回退到简化处理
+                    stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
+                    stream.put(PdfName("BitsPerComponent"), PdfNumber(8))
+                    let placeholderData = Array<UInt8>(100, repeat: UInt8(128))
+                    stream.setContent(placeholderData)
+                }
+            case None =>
+                // 解析失败，创建空白图片
+                stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
+                stream.put(PdfName("BitsPerComponent"), PdfNumber(8))
+                let blankData = Array<UInt8>(100, repeat: UInt8(255))
+                stream.setContent(blankData)
+        }
+    }
+
+    /**
+     * 创建 BMP XObject
+     * 将 BMP 转换为 RGB 数据
+     */
+    private func createBmpXObject(stream: PdfStream, rawData: Array<UInt8>): Unit {
+        match (BmpParser.parse(rawData)) {
+            case Some(bmpInfo) =>
+                try {
+                    // 将 BMP 转换为 RGB（处理上下翻转和调色板）
+                    let imageData = BmpParser.convertToRGB(bmpInfo)
+
+                    stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
+                    stream.put(PdfName("BitsPerComponent"), PdfNumber(8))
+
+                    // 压缩数据用于 PDF
+                    let compressedData = FlateEncoder.encode(imageData)
+
+                    stream.put(PdfName.FILTER, PdfName.FLATEDECODE)
+                    stream.setContent(compressedData)
+                } catch (e: Exception) {
+                    // 如果处理失败，回退到简化处理
                     stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
                     stream.put(PdfName("BitsPerComponent"), PdfNumber(8))
                     let placeholderData = Array<UInt8>(100, repeat: UInt8(128))
@@ -737,6 +773,39 @@ public class PdfWriter <: DocListener {
         } else {
             return c
         }
+    }
+
+    /**
+     * 将索引色数据转换为 RGB
+     * @param indexedData 索引值数组
+     * @param palette 调色板数据（RGB格式，每个颜色3字节）
+     * @return RGB数据数组
+     */
+    private func convertIndexedToRGB(indexedData: Array<UInt8>, palette: Array<UInt8>): Array<UInt8> {
+        let pixelCount = indexedData.size
+        let rgbData = Array<UInt8>(pixelCount * 3, repeat: UInt8(0))
+
+        var i: Int64 = 0
+        while (i < pixelCount) {
+            let index = Int64(indexedData[i])
+            let paletteOffset = index * 3
+
+            // 检查调色板索引是否有效
+            if (paletteOffset + 2 < palette.size) {
+                rgbData[i * 3] = palette[paletteOffset]          // R
+                rgbData[i * 3 + 1] = palette[paletteOffset + 1]  // G
+                rgbData[i * 3 + 2] = palette[paletteOffset + 2]  // B
+            } else {
+                // 如果索引超出调色板范围，使用黑色
+                rgbData[i * 3] = UInt8(0)
+                rgbData[i * 3 + 1] = UInt8(0)
+                rgbData[i * 3 + 2] = UInt8(0)
+            }
+
+            i += 1
+        }
+
+        rgbData
     }
 
     /**

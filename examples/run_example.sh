@@ -13,8 +13,8 @@ if [ -z "$1" ]; then
     echo ""
     echo "可用示例:"
     echo "  hello_world          - 入门示例"
-    echo "  table_example        - 表格示例"
-    echo "  comprehensive_example - 综合示例"
+    echo "  example_table        - 表格示例"
+    echo "  example_comprehensive - 综合示例"
     exit 1
 fi
 

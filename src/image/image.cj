@@ -1,6 +1,6 @@
 /**
  * PDF-CJ: Image - 图片元素
- * 支持 JPEG、PNG 等格式的图片
+ * 支持 JPEG、PNG、GIF、BMP 等格式的图片
  */
 package pdf_cj.image
 
@@ -182,6 +182,10 @@ public class Image <: Element {
                 parsePngData(data)
             case ImageType.Jpeg =>
                 parseJpegData(data)
+            case ImageType.Gif =>
+                parseGifData(data)
+            case ImageType.Bmp =>
+                parseBmpData(data)
             case _ =>
                 // 默认尺寸
                 this._width = 100.0
@@ -197,11 +201,37 @@ public class Image <: Element {
             case Some(info) =>
                 this._width = Float32(info.width)
                 this._height = Float32(info.height)
-                println("[Image] PNG dimensions: ${this._width} x ${this._height}")
             case None =>
                 this._width = 100.0
                 this._height = 100.0
-                println("[Image] PNG parse failed, using default: 100 x 100")
+        }
+    }
+
+    /**
+     * 解析GIF图片数据
+     */
+    private func parseGifData(data: Array<UInt8>): Unit {
+        match (GifParser.parse(data)) {
+            case Some(info) =>
+                this._width = Float32(info.width)
+                this._height = Float32(info.height)
+            case None =>
+                this._width = 100.0
+                this._height = 100.0
+        }
+    }
+
+    /**
+     * 解析BMP图片数据
+     */
+    private func parseBmpData(data: Array<UInt8>): Unit {
+        match (BmpParser.parse(data)) {
+            case Some(info) =>
+                this._width = Float32(info.width)
+                this._height = Float32(info.height)
+            case None =>
+                this._width = 100.0
+                this._height = 100.0
         }
     }
 

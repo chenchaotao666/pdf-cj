@@ -16,7 +16,7 @@
 cjpm run hello_world
 ```
 
-### 2. comprehensive_example.cj
+### 2. example_comprehensive.cj
 **综合示例** - 展示所有核心功能
 
 展示内容：
@@ -30,10 +30,10 @@ cjpm run hello_world
 - ✅ 高级格式控制
 
 ```bash
-cjpm run comprehensive_example
+cjpm run example_comprehensive
 ```
 
-### 3. table_example.cj
+### 3. example_table.cj
 **表格专题示例** - 深入展示表格功能
 
 展示内容：
@@ -45,7 +45,7 @@ cjpm run comprehensive_example
 - 合计行
 
 ```bash
-cjpm run table_example
+cjpm run example_table
 ```
 
 ## 🚀 运行示例
@@ -69,10 +69,10 @@ cjpm build
 ./run_example.sh hello_world
 
 # 运行表格示例
-./run_example.sh table_example
+./run_example.sh example_table
 
 # 运行综合示例
-./run_example.sh comprehensive_example
+./run_example.sh example_comprehensive
 ```
 
 ### 方法 2：手动编译运行
@@ -178,8 +178,8 @@ document.setFooter(footer)
 ## 🎯 学习路径
 
 1. **初学者**：从 `hello_world.cj` 开始，了解基本流程
-2. **进阶**：阅读 `table_example.cj`，学习表格创建
-3. **全面掌握**：研究 `comprehensive_example.cj`，了解所有功能
+2. **进阶**：阅读 `example_table.cj`，学习表格创建
+3. **全面掌握**：研究 `example_comprehensive.cj`，了解所有功能
 
 ## 📚 更多资源
 

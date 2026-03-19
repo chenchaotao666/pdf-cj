@@ -21,7 +21,7 @@ entry = "examples/table_example.cj"
 
 [[run]]
 name = "comprehensive_example"
-entry = "examples/comprehensive_example.cj"
+entry = "examples/example_comprehensive.cj"
 
 [[run]]
 name = "test_header"

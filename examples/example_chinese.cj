@@ -11,7 +11,7 @@ main() {
     println("=" * 50)
 
     // 创建输出文件
-    let outputPath = "chinese_example.pdf"
+    let outputPath = "example_chinese.pdf"
     let output = File(Path(outputPath), OpenMode.Write)
 
     // 创建文档
