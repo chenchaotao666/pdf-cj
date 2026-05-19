@@ -63,8 +63,8 @@ public class BmpParser {
             return None
         }
 
-        // 只支持无压缩的 BMP
-        if (info.compression != 0) {
+        // 只支持无压缩（0）和 RLE8（1）
+        if (info.compression != 0 && info.compression != 1) {
             return None
         }
 
@@ -145,6 +145,25 @@ public class BmpParser {
         let width = Int64(bmpInfo.width)
         let height = Int64(bmpInfo.height)
         let bitDepth = Int64(bmpInfo.bitDepth)
+        let pixelCount = width * height
+
+        // RLE8 压缩：单独处理
+        if (bmpInfo.compression == 1) {
+            let indices = decodeRLE8(bmpInfo.imageData, bmpInfo.width, bmpInfo.height)
+            let rgbSize = pixelCount * 3
+            let rgbData = Array<UInt8>(rgbSize, repeat: UInt8(255))
+            var i: Int64 = 0
+            while (i < pixelCount) {
+                let paletteOffset = Int64(indices[i]) * 3
+                if (paletteOffset + 2 < bmpInfo.palette.size) {
+                    rgbData[i * 3]     = bmpInfo.palette[paletteOffset]
+                    rgbData[i * 3 + 1] = bmpInfo.palette[paletteOffset + 1]
+                    rgbData[i * 3 + 2] = bmpInfo.palette[paletteOffset + 2]
+                }
+                i += 1
+            }
+            return rgbData
+        }
 
         // 计算每行字节数（需要 4 字节对齐）
         let bytesPerPixel = bitDepth / 8
@@ -154,7 +173,26 @@ public class BmpParser {
         let rgbSize = width * height * 3
         let rgbData = Array<UInt8>(rgbSize, repeat: UInt8(0))
 
-        if (bitDepth == 24) {
+        if (bitDepth == 32) {
+            // 32-bit BGRA：跳过 Alpha 通道
+            var y: Int64 = 0
+            while (y < height) {
+                let srcRow = (height - 1 - y) * rowSize
+                let dstRow = y * width * 3
+                var x: Int64 = 0
+                while (x < width) {
+                    let srcIdx = srcRow + x * 4
+                    let dstIdx = dstRow + x * 3
+                    if (srcIdx + 2 < bmpInfo.imageData.size && dstIdx + 2 < rgbSize) {
+                        rgbData[dstIdx]     = bmpInfo.imageData[srcIdx + 2]  // R
+                        rgbData[dstIdx + 1] = bmpInfo.imageData[srcIdx + 1]  // G
+                        rgbData[dstIdx + 2] = bmpInfo.imageData[srcIdx]      // B
+                    }
+                    x += 1
+                }
+                y += 1
+            }
+        } else if (bitDepth == 24) {
             // 24 位真彩色（BGR 格式）
             var y: Int64 = 0
             while (y < height) {
@@ -250,5 +288,79 @@ public class BmpParser {
         }
 
         rgbData
+    }
+
+    /**
+     * RLE8 解压：返回显示顺序（从上到下）的像素索引数组
+     */
+    private static func decodeRLE8(data: Array<UInt8>, width: Int32, height: Int32): Array<UInt8> {
+        let totalPixels = Int64(width) * Int64(height)
+        let indices = Array<UInt8>(totalPixels, repeat: UInt8(0))
+        var pos: Int64 = 0
+        var x: Int32 = 0
+        var row: Int32 = 0   // 存储顺序行号（0 = 图像最底行）
+        var done = false
+
+        while (!done && pos < data.size && row < height) {
+            let b0 = data[pos]
+            pos += 1
+
+            if (b0 != UInt8(0)) {
+                // 编码模式：将 b1 重复 b0 次
+                if (pos >= data.size) { break }
+                let b1 = data[pos]
+                pos += 1
+                var count: Int32 = Int32(b0)
+                while (count > 0 && x < width) {
+                    let dispRow = Int64(height - 1 - row)
+                    let idx = dispRow * Int64(width) + Int64(x)
+                    if (idx >= 0 && idx < totalPixels) {
+                        indices[idx] = b1
+                    }
+                    x += 1
+                    count -= 1
+                }
+            } else {
+                if (pos >= data.size) { break }
+                let b1 = data[pos]
+                pos += 1
+
+                if (b1 == UInt8(0)) {
+                    // 行结束
+                    x = 0
+                    row += 1
+                } else if (b1 == UInt8(1)) {
+                    // 位图结束
+                    done = true
+                } else if (b1 == UInt8(2)) {
+                    // Delta：跳过指定列数和行数
+                    if (pos + 1 < data.size) {
+                        x += Int32(data[pos])
+                        row += Int32(data[pos + 1])
+                        pos += 2
+                    }
+                } else {
+                    // 绝对模式：读取 b1 个字面像素
+                    let count: Int32 = Int32(b1)
+                    var i: Int32 = 0
+                    while (i < count && pos < data.size) {
+                        let dispRow = Int64(height - 1 - row)
+                        let idx = dispRow * Int64(width) + Int64(x)
+                        if (idx >= 0 && idx < totalPixels && x < width) {
+                            indices[idx] = data[pos]
+                        }
+                        pos += 1
+                        x += 1
+                        i += 1
+                    }
+                    // 字节数为奇数时跳过填充字节
+                    if (count % 2 == 1) {
+                        pos += 1
+                    }
+                }
+            }
+        }
+
+        indices
     }
 }

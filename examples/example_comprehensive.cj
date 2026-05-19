@@ -4,10 +4,9 @@
  */
 package pdf_cj_examples
 
-import pdf_cj.api.{Document, Paragraph, Phrase, Chunk, Chapter, Section}
+import pdf_cj.api.{Document, Paragraph, Phrase, Chunk}
 import pdf_cj.core.PdfWriter
 import pdf_cj.table.{PdfPTable, PdfPCell}
-import pdf_cj.image.Image
 import pdf_cj.codec.{ASCIIHexEncoder, ASCII85Encoder, FlateEncoder}
 import pdf_cj.text.{BaseFont, Font, FontStyle, Color, Alignment}
 import pdf_cj.util.PageSize
@@ -33,11 +32,6 @@ public func exampleComprehensiveText(): Unit {
         document.addTitle("PDF-CJ 综合功能 - 文本")
         document.addAuthor("仓颉开发者")
         document.open()
-
-        // 页眉页脚
-        let hFont = cjkFont(10.0)
-        document.setHeader(HeaderFooter(Phrase("PDF-CJ 综合功能演示", hFont), false))
-        document.setFooter(HeaderFooter(Phrase("第 ", hFont), true, Phrase(" 页", hFont)))
 
         let title = Paragraph("第一章：文本和段落功能", cjkBold(24.0))
         title.setAlignment(Alignment.Center)
@@ -169,101 +163,11 @@ public func exampleComprehensiveTable(): Unit {
 }
 
 /**
- * 示例3：图片功能（各格式、缩放方式、对齐）
- */
-public func exampleComprehensiveImages(): Unit {
-    try {
-        println("示例3：图片功能...")
-
-        let document = Document(PageSize.A4, 50.0, 50.0, 50.0, 50.0)
-        let file = File(Path("output/example_comprehensive_images.pdf"), OpenMode.Write)
-        let writer = PdfWriter.getInstance(document, file)
-        document.addTitle("PDF-CJ 综合功能 - 图片")
-        document.open()
-
-        let normalFont = cjkFont(12.0)
-        let boldFont   = cjkBold(12.0)
-        let titleFont  = cjkBold(20.0)
-        let availW = 495.0   // A4 - 左右边距各 50
-
-        let title = Paragraph("第三章：图片功能", titleFont)
-        title.setAlignment(Alignment.Center)
-        title.setSpacingAfter(20.0)
-        document.add(title)
-
-        // PNG 图片
-        document.add(Paragraph("PNG 格式图片（缩放至页宽 80%）", boldFont))
-        let pngImage = Image.getInstance("images/mountain.png")
-        pngImage.scaleToFit(Float32(availW * 0.8), 300.0)
-        pngImage.setAlignment(Alignment.Center)
-        document.add(pngImage)
-
-        // JPEG 图片
-        document.newPage()
-        document.add(Paragraph("JPEG 格式图片（缩放至页宽 90%）", boldFont))
-        let jpgImage = Image.getInstance("images/river.jpg")
-        jpgImage.scaleToFit(Float32(availW * 0.9), 400.0)
-        jpgImage.setAlignment(Alignment.Center)
-        document.add(jpgImage)
-
-        // 缩放对比
-        document.newPage()
-        document.add(Paragraph("缩放方式对比（nodes.jpeg）", boldFont))
-        document.add(Paragraph("百分比缩放 40%：", normalFont))
-        let img1 = Image.getInstance("images/nodes.jpeg")
-        img1.scalePercent(40.0)
-        img1.setAlignment(Alignment.Center)
-        document.add(img1)
-
-        let img2Label = Paragraph("固定尺寸 200×200：", normalFont)
-        img2Label.setSpacingBefore(10.0)
-        document.add(img2Label)
-        let img2 = Image.getInstance("images/nodes.jpeg")
-        img2.scaleAbsolute(200.0, 200.0)
-        img2.setAlignment(Alignment.Center)
-        document.add(img2)
-
-        // 对齐方式
-        document.newPage()
-        document.add(Paragraph("图片对齐方式：", boldFont))
-        for ((label, align) in [("左对齐", Alignment.Left), ("居中", Alignment.Center), ("右对齐", Alignment.Right)]) {
-            document.add(Paragraph(label + "：", normalFont))
-            let img = Image.getInstance("images/nodes.jpeg")
-            img.scalePercent(15.0)
-            img.setAlignment(align)
-            document.add(img)
-        }
-
-        // GIF 和 BMP
-        document.newPage()
-        document.add(Paragraph("GIF 格式（square.gif）：", boldFont))
-        let gifImage = Image.getInstance("images/square.gif")
-        gifImage.scalePercent(500.0)
-        gifImage.setAlignment(Alignment.Center)
-        document.add(gifImage)
-
-        let bmpLabel = Paragraph("BMP 格式（guest.bmp）：", boldFont)
-        bmpLabel.setSpacingBefore(20.0)
-        document.add(bmpLabel)
-        let bmpImage = Image.getInstance("images/guest.bmp")
-        bmpImage.scalePercent(50.0)
-        bmpImage.setAlignment(Alignment.Center)
-        document.add(bmpImage)
-
-        document.close()
-        file.close()
-        println("✓ 成功创建: output/example_comprehensive_images.pdf")
-    } catch (e: Exception) {
-        println("✗ 错误: ${e.message}")
-    }
-}
-
-/**
- * 示例4：编码与压缩（ASCIIHex / ASCII85 / Flate）
+ * 示例3：编码与压缩（ASCIIHex / ASCII85 / Flate）
  */
 public func exampleComprehensiveCodec(): Unit {
     try {
-        println("示例4：编码与压缩...")
+        println("示例3：编码与压缩...")
 
         let document = Document(PageSize.A4, 50.0, 50.0, 50.0, 50.0)
         let file = File(Path("output/example_comprehensive_codec.pdf"), OpenMode.Write)
@@ -318,7 +222,6 @@ main(): Int64 {
 
     exampleComprehensiveText()
     exampleComprehensiveTable()
-    exampleComprehensiveImages()
     exampleComprehensiveCodec()
 
     println("\n=== 验证完成 ===")
