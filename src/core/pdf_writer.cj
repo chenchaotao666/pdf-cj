@@ -15,7 +15,7 @@ import pdf_cj.util.{Rectangle, PageSize, PdfException}
 import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
 import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser}
-import pdf_cj.form.{PdfAnnotation, PdfFormField, PdfOutlineTree, PdfOutline}
+import pdf_cj.form.{PdfAnnotation, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination}
 import pdf_cj.codec.FlateEncoder
 import zlib4cj.{Zlib, ZlibType}
 
@@ -390,6 +390,31 @@ public class PdfWriter <: DocListener {
      */
     public func setOutlineTree(tree: PdfOutlineTree): Unit {
         _outlineTree = Some(tree)
+    }
+
+    /**
+     * 获取书签树（不存在则自动创建），用于逐步添加书签
+     */
+    public func getOutlineTree(): PdfOutlineTree {
+        match (_outlineTree) {
+            case Some(tree) => tree
+            case None =>
+                let tree = PdfOutlineTree()
+                _outlineTree = Some(tree)
+                tree
+        }
+    }
+
+    /**
+     * 添加根级书签（快捷方式）
+     * @param title 书签标题
+     * @param dest  目标位置（用 getCurrentPageReference() 构造）
+     * @return 新建的 PdfOutline，可继续添加子书签
+     */
+    public func addOutline(title: String, dest: PdfDestination): PdfOutline {
+        let outline = PdfOutline(title, dest)
+        getOutlineTree().addOutline(outline)
+        outline
     }
 
     /**

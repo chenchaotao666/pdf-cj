@@ -44,6 +44,12 @@ public import pdf_cj.codec.{
     FlateEncoder, ASCIIHexEncoder, ASCII85Encoder
 }
 
+// 导出书签模块
+public import pdf_cj.form.{
+    PdfOutline, PdfOutlineTree, PdfOutlineBuilder,
+    PdfDestination
+}
+
 // 导出基础对象（供高级用户使用）
 public import pdf_cj.base.{
     PdfObject, PdfObjectType,

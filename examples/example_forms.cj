@@ -1,17 +1,14 @@
 /**
- * PDF-CJ 表单、注释与书签功能示例
- * 演示如何在 PDF 中添加可交互的表单字段、注释标记和文档书签。
+ * PDF-CJ 表单功能示例
+ * 演示如何在 PDF 中添加可交互的表单字段（文本框、复选框、下拉框）。
  */
 package pdf_cj_examples
 
 import pdf_cj.api.{Document, Paragraph}
 import pdf_cj.core.PdfWriter
-import pdf_cj.form.{
-    PdfFormFieldFactory, PdfAnnotationFactory,
-    PdfOutlineTree, PdfOutline, PdfDestination
-}
+import pdf_cj.form.PdfFormFieldFactory
 import pdf_cj.text.{BaseFont, Font}
-import pdf_cj.util.{PageSize, Rectangle}
+import pdf_cj.util.PageSize
 import std.fs.{File, OpenMode, Path}
 
 let NOTO_CJK_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
@@ -118,161 +115,15 @@ public func exampleCreateForm(): Unit {
 }
 
 /**
- * 示例：添加文本注释、链接注释和高亮注释
- */
-public func exampleAnnotations(): Unit {
-    try {
-        println("\n示例：添加注释...")
-
-        let document = Document(PageSize.A4)
-        let file = File(Path("output/example_forms_annotations.pdf"), OpenMode.Write)
-        let writer = PdfWriter.getInstance(document, file)
-        document.open()
-
-        let font = cjkFont(12.0)
-
-        document.add(Paragraph("PDF 注释示例", cjkFont(18.0)))
-        document.add(Paragraph(" ", font))
-        document.add(Paragraph("本文档演示三种注释类型。", font))
-        document.add(Paragraph(" ", font))
-        document.add(Paragraph("1. 文本注释（气泡图标）", font))
-        document.add(Paragraph("   请查看页面右侧的注释图标。", font))
-
-        // 文本注释（显示为气泡图标，点击后弹出文字）
-        let textAnnot = PdfAnnotationFactory.createText(450.0, 700.0, "这是一条文本注释，可以附加说明信息。")
-        textAnnot.setTitle("作者")
-        textAnnot.setOpen(false)
-        writer.addAnnotation(textAnnot)
-
-        document.add(Paragraph(" ", font))
-        document.add(Paragraph("2. 超链接注释（点击可打开网页）", font))
-        document.add(Paragraph("   点击下方蓝色区域可访问网站。", font))
-
-        // 链接注释（点击打开 URL）
-        let linkRect = Rectangle(72.0, 620.0, 250.0, 640.0)
-        let linkAnnot = PdfAnnotationFactory.createURLLink(linkRect, "https://www.example.com")
-        linkAnnot.setHighlightMode("I")
-        writer.addAnnotation(linkAnnot)
-
-        document.add(Paragraph(" ", font))
-        document.add(Paragraph("3. 高亮注释（标记重要文字）", font))
-        document.add(Paragraph("   下方文字已被高亮标记为重要内容。", font))
-
-        // 高亮注释（黄色高亮）
-        let hlRect = Rectangle(72.0, 570.0, 320.0, 586.0)
-        let quadPoints: Array<Float32> = [72.0, 570.0, 320.0, 570.0, 72.0, 586.0, 320.0, 586.0]
-        let highlight = PdfAnnotationFactory.createHighlight(hlRect, quadPoints)
-        highlight.setColor(1.0, 1.0, 0.0)
-        writer.addAnnotation(highlight)
-
-        document.close()
-        file.close()
-
-        println("  - 已添加文本注释、超链接注释、高亮注释")
-        println("✓ 成功创建: output/example_forms_annotations.pdf")
-    } catch (e: Exception) {
-        println("✗ 错误: ${e.message}")
-    }
-}
-
-/**
- * 示例：创建多页文档并添加书签导航
- */
-public func exampleOutlines(): Unit {
-    try {
-        println("\n示例：创建书签（大纲）...")
-
-        let document = Document(PageSize.A4)
-        let file = File(Path("output/example_forms_outlines.pdf"), OpenMode.Write)
-        let writer = PdfWriter.getInstance(document, file)
-        document.open()
-
-        let titleFont = cjkFont(20.0)
-        let headFont = cjkFont(16.0)
-        let bodyFont = cjkFont(12.0)
-
-        // --- 第一页：第一章 ---
-        let page1Ref = writer.getCurrentPageReference()
-
-        document.add(Paragraph("第一章  语言概述", titleFont))
-        document.add(Paragraph(" ", bodyFont))
-        document.add(Paragraph(
-            "仓颉语言是华为推出的面向全场景应用开发的通用编程语言，支持多后端、多范式编程。",
-            bodyFont))
-        document.add(Paragraph(" ", bodyFont))
-
-        // 第 1.1 节（仍在第一页）
-        let sec11Ref = writer.getCurrentPageReference()
-        document.add(Paragraph("1.1  设计目标", headFont))
-        document.add(Paragraph(
-            "仓颉以安全、高效、易用为核心设计目标，提供完善的并发支持和内存安全机制。",
-            bodyFont))
-
-        // --- 第二页：第二章 ---
-        document.newPage()
-        let page2Ref = writer.getCurrentPageReference()
-
-        document.add(Paragraph("第二章  基本类型", titleFont))
-        document.add(Paragraph(" ", bodyFont))
-        document.add(Paragraph(
-            "仓颉提供丰富的基本数据类型：整型（Int8/16/32/64）、浮点型（Float32/64）、布尔型（Bool）等。",
-            bodyFont))
-        document.add(Paragraph(" ", bodyFont))
-
-        let sec21Ref = writer.getCurrentPageReference()
-        document.add(Paragraph("2.1  整数类型", headFont))
-        document.add(Paragraph("整数类型包括有符号和无符号两类，共 8 种。", bodyFont))
-        document.add(Paragraph(" ", bodyFont))
-
-        // --- 第三页：第三章 ---
-        document.newPage()
-        let page3Ref = writer.getCurrentPageReference()
-
-        document.add(Paragraph("第三章  函数与闭包", titleFont))
-        document.add(Paragraph(" ", bodyFont))
-        document.add(Paragraph(
-            "仓颉函数是一等公民，支持高阶函数、Lambda 表达式和闭包捕获。",
-            bodyFont))
-
-        // 构建书签树
-        let tree = PdfOutlineTree()
-
-        let ch1 = PdfOutline("第一章  语言概述", PdfDestination(page1Ref))
-        ch1.setBold(true)
-        tree.addOutline(ch1)
-        ch1.addChild(PdfOutline("1.1  设计目标", PdfDestination(sec11Ref)))
-
-        let ch2 = PdfOutline("第二章  基本类型", PdfDestination(page2Ref))
-        ch2.setBold(true)
-        tree.addOutline(ch2)
-        ch2.addChild(PdfOutline("2.1  整数类型", PdfDestination(sec21Ref)))
-
-        let ch3 = PdfOutline("第三章  函数与闭包", PdfDestination(page3Ref))
-        ch3.setBold(true)
-        tree.addOutline(ch3)
-
-        writer.setOutlineTree(tree)
-
-        document.close()
-        file.close()
-
-        println("  - 已添加书签：3 章，其中 2 章含子节")
-        println("✓ 成功创建: output/example_forms_outlines.pdf")
-    } catch (e: Exception) {
-        println("✗ 错误: ${e.message}")
-    }
-}
-
-/**
  * 主函数
  */
 main(): Int64 {
-    println("=== PDF-CJ 表单、注释与书签功能示例 ===")
+    println("=== PDF-CJ 表单功能验证 ===\n")
 
     exampleCreateForm()
-    exampleAnnotations()
-    exampleOutlines()
 
-    println("\n=== 完成 ===")
+    println("\n=== 验证完成 ===")
+    println("请检查 output/ 目录中的 PDF 文件")
+    println("  example_forms_form.pdf - 文本框、下拉框、复选框")
     0
 }
