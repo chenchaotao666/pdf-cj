@@ -7,6 +7,7 @@ package pdf_cj.core
 import std.collection.ArrayList
 import pdf_cj.base.{PdfStream, PdfName, ByteWrapper}
 import pdf_cj.text.{Color, BaseFont}
+import std.math.{sin, cos, tan}
 
 /**
  * PDF 内容流生成器
@@ -14,21 +15,38 @@ import pdf_cj.text.{Color, BaseFont}
  */
 public class PdfContentByte {
     private var content: ArrayList<ByteWrapper> = ArrayList<ByteWrapper>()
-    private var _writer: PdfWriter
+    private var _writer: ?PdfWriter = None
     private var inText: Bool = false
 
     // 图形状态栈深度
     private var stateDepth: Int32 = 0
 
+    // 当前字体（用于 showTextAligned 宽度计算）
+    private var _currentBaseFont: ?BaseFont = None
+    private var _currentFontSize: Float32 = 12.0
+
+    // 文本对齐常量（与 OpenPDF Element 对齐值保持一致）
+    public static let ALIGN_LEFT: Int32 = 0
+    public static let ALIGN_CENTER: Int32 = 1
+    public static let ALIGN_RIGHT: Int32 = 2
+
     public init(writer: PdfWriter) {
-        this._writer = writer
+        this._writer = Some(writer)
+    }
+
+    // 测试专用：不依赖真实 PdfWriter
+    public init() {
+        this._writer = None
     }
 
     /**
      * 获取 PdfWriter
      */
     public func getWriter(): PdfWriter {
-        _writer
+        match (_writer) {
+            case Some(w) => w
+            case None => throw Exception("PdfContentByte: writer not initialized")
+        }
     }
 
     // ===== 文本操作 =====
@@ -67,6 +85,63 @@ public class PdfContentByte {
         appendFloat(size)
         appendString(" Tf")
         appendNewLine()
+    }
+
+    /**
+     * 设置字体和大小（同时追踪 BaseFont，供 showTextAligned 计算宽度使用）
+     */
+    public func setFontAndSize(baseFont: BaseFont, name: String, size: Float32): Unit {
+        _currentBaseFont = Some(baseFont)
+        _currentFontSize = size
+        setFontAndSize(name, size)
+    }
+
+    /**
+     * 在绝对坐标处显示对齐文本（需在 BT/ET 块内调用）
+     * @param align   对齐方式：ALIGN_LEFT / ALIGN_CENTER / ALIGN_RIGHT
+     * @param text    文本内容
+     * @param x       锚点 x 坐标（LEFT=左边缘，CENTER=中心，RIGHT=右边缘）
+     * @param y       锚点 y 坐标
+     * @param rotation 旋转角度（度，逆时针）
+     */
+    public func showTextAligned(align: Int32, text: String, x: Float32, y: Float32, rotation: Float32): Unit {
+        var textWidth: Float32 = 0.0
+        var useUnicode = false
+        match (_currentBaseFont) {
+            case Some(bf) =>
+                textWidth = bf.getWidthPoint(text, _currentFontSize)
+                useUnicode = bf.isUnicodeEncoding()
+            case None => ()
+        }
+
+        let PI = 3.14159265358979
+        var adjX = x
+        var adjY = y
+
+        if (rotation == 0.0) {
+            if (align == ALIGN_CENTER) {
+                adjX = x - textWidth / 2.0
+            } else if (align == ALIGN_RIGHT) {
+                adjX = x - textWidth
+            }
+            setTextMatrix(adjX, adjY)
+        } else {
+            let rad = Float64(rotation) * PI / 180.0
+            let cosR = cos(rad)
+            let sinR = sin(rad)
+            var offset: Float32 = 0.0
+            if (align == ALIGN_CENTER) {
+                offset = textWidth / 2.0
+            } else if (align == ALIGN_RIGHT) {
+                offset = textWidth
+            }
+            // 沿旋转方向回退 offset，使锚点对应到文字末尾/中点
+            adjX = x - Float32(Float64(offset) * cosR)
+            adjY = y - Float32(Float64(offset) * sinR)
+            setTextMatrix(Float32(cosR), Float32(sinR), Float32(-sinR), Float32(cosR), adjX, adjY)
+        }
+
+        showText(text, useUnicode, _currentBaseFont)
     }
 
     /**
@@ -288,6 +363,36 @@ public class PdfContentByte {
         appendNewLine()
     }
 
+    /**
+     * 设置填充颜色（CMYK，各分量 0.0-1.0）
+     */
+    public func setCMYKColorFill(c: Float32, m: Float32, y: Float32, k: Float32): Unit {
+        appendFloat(c)
+        appendSpace()
+        appendFloat(m)
+        appendSpace()
+        appendFloat(y)
+        appendSpace()
+        appendFloat(k)
+        appendString(" k")
+        appendNewLine()
+    }
+
+    /**
+     * 设置描边颜色（CMYK，各分量 0.0-1.0）
+     */
+    public func setCMYKColorStroke(c: Float32, m: Float32, y: Float32, k: Float32): Unit {
+        appendFloat(c)
+        appendSpace()
+        appendFloat(m)
+        appendSpace()
+        appendFloat(y)
+        appendSpace()
+        appendFloat(k)
+        appendString(" K")
+        appendNewLine()
+    }
+
     // ===== 图形状态 =====
 
     /**
@@ -347,10 +452,46 @@ public class PdfContentByte {
     }
 
     /**
-     * 设置虚线模式
+     * 取消虚线（恢复实线）
      */
     public func setLineDash(phase: Float32): Unit {
         appendString("[] ")
+        appendFloat(phase)
+        appendString(" d")
+        appendNewLine()
+    }
+
+    /**
+     * 设置等长虚线
+     * @param on    实线长度（点）
+     * @param off   间隔长度（点）
+     * @param phase 相位偏移（点）
+     */
+    public func setLineDash(on: Float32, off: Float32, phase: Float32): Unit {
+        appendString("[")
+        appendFloat(on)
+        appendSpace()
+        appendFloat(off)
+        appendString("] ")
+        appendFloat(phase)
+        appendString(" d")
+        appendNewLine()
+    }
+
+    /**
+     * 设置自定义虚线模式（任意段数）
+     * @param pattern 交替实线/间隔长度数组（点）
+     * @param phase   相位偏移（点）
+     */
+    public func setLineDash(pattern: Array<Float32>, phase: Float32): Unit {
+        appendString("[")
+        var i = 0
+        while (i < pattern.size) {
+            if (i > 0) { appendSpace() }
+            appendFloat(pattern[i])
+            i += 1
+        }
+        appendString("] ")
         appendFloat(phase)
         appendString(" d")
         appendNewLine()
@@ -455,6 +596,39 @@ public class PdfContentByte {
         appendNewLine()
     }
 
+    /**
+     * 使用奇偶规则填充并描边
+     */
+    public func eoFillStroke(): Unit {
+        appendString("B*")
+        appendNewLine()
+    }
+
+    /**
+     * 结束路径（不绘制）
+     */
+    public func newPath(): Unit {
+        appendString("n")
+        appendNewLine()
+    }
+
+    /**
+     * 用当前路径设置裁剪区域（非零绕数规则）
+     * 注意：clip() 必须在 stroke()/fill()/newPath() 之前调用
+     */
+    public func clip(): Unit {
+        appendString("W")
+        appendNewLine()
+    }
+
+    /**
+     * 用当前路径设置裁剪区域（奇偶规则）
+     */
+    public func eoClip(): Unit {
+        appendString("W*")
+        appendNewLine()
+    }
+
     // ===== 矩形 =====
 
     /**
@@ -470,6 +644,95 @@ public class PdfContentByte {
         appendFloat(height)
         appendString(" re")
         appendNewLine()
+    }
+
+    /**
+     * 画圆角矩形
+     * @param x      左下角 x
+     * @param y      左下角 y
+     * @param width  宽度
+     * @param height 高度
+     * @param radius 圆角半径
+     */
+    public func roundRectangle(x: Float32, y: Float32, width: Float32, height: Float32, radius: Float32): Unit {
+        // k = 0.5523 是用贝塞尔曲线近似四分之一圆弧的最优控制点系数
+        let k = radius * 0.5523
+        moveTo(x + radius, y)
+        lineTo(x + width - radius, y)
+        curveTo(x + width - radius + k, y, x + width, y + radius - k, x + width, y + radius)
+        lineTo(x + width, y + height - radius)
+        curveTo(x + width, y + height - radius + k, x + width - radius + k, y + height, x + width - radius, y + height)
+        lineTo(x + radius, y + height)
+        curveTo(x + radius - k, y + height, x, y + height - radius + k, x, y + height - radius)
+        lineTo(x, y + radius)
+        curveTo(x, y + radius - k, x + radius - k, y, x + radius, y)
+        closePath()
+    }
+
+    /**
+     * 画椭圆（以外接矩形定义）
+     * @param x1 外接矩形左下角 x
+     * @param y1 外接矩形左下角 y
+     * @param x2 外接矩形右上角 x
+     * @param y2 外接矩形右上角 y
+     */
+    public func ellipse(x1: Float32, y1: Float32, x2: Float32, y2: Float32): Unit {
+        arc(x1, y1, x2, y2, 0.0, 360.0)
+    }
+
+    /**
+     * 画弧线（贝塞尔近似，精度 ≤ 0.03%）
+     * @param x1        外接矩形左下角 x
+     * @param y1        外接矩形左下角 y
+     * @param x2        外接矩形右上角 x
+     * @param y2        外接矩形右上角 y
+     * @param startAngle 起始角度（度，0=右，逆时针为正）
+     * @param extent    扫过角度（度，正=逆时针，负=顺时针）
+     */
+    public func arc(x1: Float32, y1: Float32, x2: Float32, y2: Float32, startAngle: Float32, extent: Float32): Unit {
+        let PI = 3.14159265358979
+        let cx = Float64((x1 + x2) / 2.0)
+        let cy = Float64((y1 + y2) / 2.0)
+        let rx = Float64((x2 - x1) / 2.0)
+        let ry = Float64((y2 - y1) / 2.0)
+
+        // 每次最多处理 90°，sign 决定扫描方向
+        let sign = if (extent >= 0.0) { 1.0 } else { -1.0 }
+        var rem = Float64(extent)
+        var startA = Float64(startAngle)
+        var first = true
+
+        while (rem * sign > 0.001) {
+            let step = if (rem * sign > 90.0) { 90.0 * sign } else { rem }
+            let angRad = startA * PI / 180.0
+            let stepRad = step * PI / 180.0
+
+            // (4/3)*tan(α/4) 是贝塞尔近似圆弧的最优系数
+            let k = (4.0 / 3.0) * tan(stepRad / 4.0)
+
+            let cosA = cos(angRad)
+            let sinA = sin(angRad)
+            let cosE = cos(angRad + stepRad)
+            let sinE = sin(angRad + stepRad)
+
+            let sx = Float32(cx + rx * cosA)
+            let sy = Float32(cy + ry * sinA)
+            let ex = Float32(cx + rx * cosE)
+            let ey = Float32(cy + ry * sinE)
+            let c1x = Float32(cx + rx * (cosA - k * sinA))
+            let c1y = Float32(cy + ry * (sinA + k * cosA))
+            let c2x = Float32(cx + rx * (cosE + k * sinE))
+            let c2y = Float32(cy + ry * (sinE - k * cosE))
+
+            if (first) {
+                moveTo(sx, sy)
+                first = false
+            }
+            curveTo(c1x, c1y, c2x, c2y, ex, ey)
+
+            startA += step
+            rem -= step
+        }
     }
 
     // ===== 变换 =====
@@ -538,12 +801,14 @@ public class PdfContentByte {
     }
 
     /**
-     * 重置内容
+     * 重置内容（清除所有已生成的操作符和追踪状态）
      */
     public func reset(): Unit {
         content = ArrayList<ByteWrapper>()
         inText = false
         stateDepth = 0
+        _currentBaseFont = None
+        _currentFontSize = 12.0
     }
 
     // ===== 内部辅助方法 =====

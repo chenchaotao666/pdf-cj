@@ -10,23 +10,3 @@ output-type = "static"
 zlib4cj = { git = "https://gitcode.com/chaoling83/zlib4cj.git" }
 
 [test-dependencies]
-
-[[run]]
-name = "hello_world"
-entry = "examples/hello_world.cj"
-
-[[run]]
-name = "table_example"
-entry = "examples/table_example.cj"
-
-[[run]]
-name = "comprehensive_example"
-entry = "examples/example_comprehensive.cj"
-
-[[run]]
-name = "test_header"
-entry = "examples/test_header.cj"
-
-[[run]]
-name = "test_png_image"
-entry = "examples/test_png_image.cj"

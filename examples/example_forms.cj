@@ -33,7 +33,7 @@ public func exampleCreateForm(): Unit {
         println("\n示例：创建 PDF 交互表单...")
 
         let document = Document(PageSize.A4)
-        let file = File(Path("output/example_form.pdf"), OpenMode.Write)
+        let file = File(Path("output/example_forms_form.pdf"), OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
         document.open()
 
@@ -111,7 +111,7 @@ public func exampleCreateForm(): Unit {
         file.close()
 
         println("  - 已添加文本字段 (name, email, notes)、下拉框 (city)、复选框 (agree)")
-        println("✓ 成功创建: output/example_form.pdf")
+        println("✓ 成功创建: output/example_forms_form.pdf")
     } catch (e: Exception) {
         println("✗ 错误: ${e.message}")
     }
@@ -125,7 +125,7 @@ public func exampleAnnotations(): Unit {
         println("\n示例：添加注释...")
 
         let document = Document(PageSize.A4)
-        let file = File(Path("output/example_annotations.pdf"), OpenMode.Write)
+        let file = File(Path("output/example_forms_annotations.pdf"), OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
         document.open()
 
@@ -169,7 +169,7 @@ public func exampleAnnotations(): Unit {
         file.close()
 
         println("  - 已添加文本注释、超链接注释、高亮注释")
-        println("✓ 成功创建: output/example_annotations.pdf")
+        println("✓ 成功创建: output/example_forms_annotations.pdf")
     } catch (e: Exception) {
         println("✗ 错误: ${e.message}")
     }
@@ -183,7 +183,7 @@ public func exampleOutlines(): Unit {
         println("\n示例：创建书签（大纲）...")
 
         let document = Document(PageSize.A4)
-        let file = File(Path("output/example_outlines.pdf"), OpenMode.Write)
+        let file = File(Path("output/example_forms_outlines.pdf"), OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
         document.open()
 
@@ -257,7 +257,7 @@ public func exampleOutlines(): Unit {
         file.close()
 
         println("  - 已添加书签：3 章，其中 2 章含子节")
-        println("✓ 成功创建: output/example_outlines.pdf")
+        println("✓ 成功创建: output/example_forms_outlines.pdf")
     } catch (e: Exception) {
         println("✗ 错误: ${e.message}")
     }

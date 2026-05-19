@@ -30,7 +30,7 @@ public func example1_createBasicPdf(): Unit {
         let document = Document(PageSize.A4)
 
         // 创建输出文件
-        let outputPath = Path("output/example1_basic.pdf")
+        let outputPath = Path("output/example_basic_hello.pdf")
         let file = File(outputPath, OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
 
@@ -56,7 +56,7 @@ public func example1_createBasicPdf(): Unit {
         document.close()
         file.close()
 
-        println("✓ 成功创建: output/example1_basic.pdf")
+        println("✓ 成功创建: output/example_basic_hello.pdf")
     } catch (e: Exception) {
         println("✗ 错误: ${e}")
         println("✗ 消息: ${e.message}")
@@ -71,7 +71,7 @@ public func example2_fonts(): Unit {
         println("\n示例2：字体示例...")
 
         let document = Document(PageSize.A4)
-        let file = File(Path("output/example2_fonts.pdf"), OpenMode.Write)
+        let file = File(Path("output/example_basic_fonts.pdf"), OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
 
         document.open()
@@ -84,7 +84,7 @@ public func example2_fonts(): Unit {
         document.close()
         file.close()
 
-        println("✓ 成功创建: output/example2_fonts.pdf")
+        println("✓ 成功创建: output/example_basic_fonts.pdf")
     } catch (e: Exception) {
         println("✗ 错误: ${e.message}")
     }
@@ -98,7 +98,7 @@ public func example3_multiPages(): Unit {
         println("\n示例3：多页面文档...")
 
         let document = Document(PageSize.A4)
-        let file = File(Path("output/example3_pages.pdf"), OpenMode.Write)
+        let file = File(Path("output/example_basic_pages.pdf"), OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
 
         document.open()
@@ -119,7 +119,7 @@ public func example3_multiPages(): Unit {
         document.close()
         file.close()
 
-        println("✓ 成功创建: output/example3_pages.pdf")
+        println("✓ 成功创建: output/example_basic_pages.pdf")
     } catch (e: Exception) {
         println("✗ 错误: ${e.message}")
     }
