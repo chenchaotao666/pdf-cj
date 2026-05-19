@@ -21,7 +21,7 @@ public import pdf_cj.core.{
 // 导出文本相关
 public import pdf_cj.text.{
     Font, BaseFont, FontFactory, FontStyle, FontFamily,
-    Color, Alignment
+    Color, Alignment, VerticalAlignment
 }
 
 // 导出工具类
@@ -31,7 +31,7 @@ public import pdf_cj.util.{
 
 // 导出表格模块
 public import pdf_cj.table.{
-    PdfPTable, PdfPRow, PdfPCell, VerticalAlignment
+    PdfPTable, PdfPRow, PdfPCell
 }
 
 // 导出图片模块

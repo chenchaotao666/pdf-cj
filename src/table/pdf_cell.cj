@@ -6,39 +6,7 @@ package pdf_cj.table
 
 import std.collection.ArrayList
 import pdf_cj.api.{Element, ElementType, ElementListener, Chunk, Phrase, Paragraph}
-import pdf_cj.text.{Color, Alignment, Border}
-
-/**
- * 垂直对齐枚举
- */
-public enum VerticalAlignment {
-    | Top
-    | Middle
-    | Bottom
-
-    /**
-     * 转换为整数值
-     */
-    public func toInt(): Int32 {
-        match (this) {
-            case Top => 0
-            case Middle => 1
-            case Bottom => 2
-        }
-    }
-
-    /**
-     * 从整数值创建
-     */
-    public static func fromInt(value: Int32): VerticalAlignment {
-        match (value) {
-            case 0 => Top
-            case 1 => Middle
-            case 2 => Bottom
-            case _ => Top
-        }
-    }
-}
+import pdf_cj.text.{Color, Alignment, Border, VerticalAlignment}
 
 /**
  * PdfPCell 类 - PDF 表格单元格

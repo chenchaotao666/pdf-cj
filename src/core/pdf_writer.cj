@@ -12,8 +12,8 @@ import pdf_cj.base.{
 }
 import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phrase, Chunk, HeaderFooter}
 import pdf_cj.util.{Rectangle, PageSize, PdfException}
-import pdf_cj.text.{Font, BaseFont, Alignment, TrueTypeFont, Color, Border}
-import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow, VerticalAlignment}
+import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border}
+import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
 import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser}
 import pdf_cj.form.{PdfAnnotation, PdfFormField, PdfOutlineTree, PdfOutline}
 import pdf_cj.codec.FlateEncoder
@@ -1323,7 +1323,7 @@ public class PdfWriter <: DocListener {
             let textY = match (cell.verticalAlignment) {
                 case Top => contentY - phrase.leading
                 case Middle => contentY - (contentHeight - phrase.leading) / 2.0
-                case Bottom => contentY - contentHeight + phrase.leading
+                case Bottom | Baseline => contentY - contentHeight + phrase.leading
             }
 
             // 绘制文本

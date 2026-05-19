@@ -162,7 +162,9 @@ public class RowBuildingTests {
         t.addCell(Phrase("A"))
         t.addCell(Phrase("B"))
         t.addCell(Phrase("C"))
-        if (let Some(row) <- t.getRow(0)) {
+        let rowOpt0 = t.getRow(0)
+        if (rowOpt0.isSome()) {
+            let row = rowOpt0.getOrThrow()
             @Expect(row.getColumnPosition(0), 0)
             @Expect(row.getColumnPosition(1), 1)
             @Expect(row.getColumnPosition(2), 2)
@@ -177,7 +179,9 @@ public class RowBuildingTests {
         wide.setColspan(2)
         t.addCell(wide)
         t.addCell(Phrase("Right"))
-        if (let Some(row) <- t.getRow(0)) {
+        let rowOpt0b = t.getRow(0)
+        if (rowOpt0b.isSome()) {
+            let row = rowOpt0b.getOrThrow()
             @Expect(row.getColumnPosition(0), 0)
             @Expect(row.getColumnPosition(1), 2)
         }
@@ -215,7 +219,9 @@ public class RowspanTests {
         t.addCell(Phrase("C"))
         t.addCell(Phrase("D"))
         t.addCell(Phrase("E"))
-        if (let Some(row1) <- t.getRow(1)) {
+        let row1OptA = t.getRow(1)
+        if (row1OptA.isSome()) {
+            let row1 = row1OptA.getOrThrow()
             @Expect(row1.cellCount, 2)
         }
     }
@@ -231,7 +237,9 @@ public class RowspanTests {
         t.addCell(Phrase("C"))
         t.addCell(Phrase("D"))
         t.addCell(Phrase("E"))
-        if (let Some(row1) <- t.getRow(1)) {
+        let row1OptB = t.getRow(1)
+        if (row1OptB.isSome()) {
+            let row1 = row1OptB.getOrThrow()
             @Expect(row1.getColumnPosition(0), 1)
             @Expect(row1.getColumnPosition(1), 2)
         }
@@ -249,7 +257,9 @@ public class RowspanTests {
         t.addCell(Phrase("D"))
         t.addCell(Phrase("E"))
         @Expect(t.rowCount, 2)
-        if (let Some(row1) <- t.getRow(1)) {
+        let row1OptC = t.getRow(1)
+        if (row1OptC.isSome()) {
+            let row1 = row1OptC.getOrThrow()
             @Expect(row1.cellCount, 2)
             @Expect(row1.getColumnPosition(0), 0)
             @Expect(row1.getColumnPosition(1), 2)
@@ -267,11 +277,13 @@ public class RowspanTests {
         t.addCell(Phrase("R2"))
         @Expect(t.rowCount, 3)
         // 每行只有 1 个实际单元格（另一列被 rowspan 占用）
-        if (let Some(r1) <- t.getRow(1)) {
-            @Expect(r1.cellCount, 1)
+        let r1Opt = t.getRow(1)
+        if (r1Opt.isSome()) {
+            @Expect(r1Opt.getOrThrow().cellCount, 1)
         }
-        if (let Some(r2) <- t.getRow(2)) {
-            @Expect(r2.cellCount, 1)
+        let r2Opt = t.getRow(2)
+        if (r2Opt.isSome()) {
+            @Expect(r2Opt.getOrThrow().cellCount, 1)
         }
     }
 
@@ -289,7 +301,9 @@ public class RowspanTests {
         t.addCell(Phrase("D"))
         t.addCell(Phrase("E"))
         @Expect(t.rowCount, 2)
-        if (let Some(row1) <- t.getRow(1)) {
+        let row1OptD = t.getRow(1)
+        if (row1OptD.isSome()) {
+            let row1 = row1OptD.getOrThrow()
             @Expect(row1.cellCount, 2)
             @Expect(row1.getColumnPosition(0), 2)
             @Expect(row1.getColumnPosition(1), 3)
