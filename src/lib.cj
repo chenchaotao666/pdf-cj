@@ -14,7 +14,7 @@ public import pdf_cj.api.{
 
 // 导出核心写入器
 public import pdf_cj.core.{
-    PdfWriter, PdfContentByte, PdfPageEvent, PdfPageEventAdapter,
+    PdfWriter, PdfContentByte, PdfPageEvent, PdfPageEventHelper,
     ColumnText
 }
 

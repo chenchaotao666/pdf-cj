@@ -84,6 +84,9 @@ public class PdfWriter <: DocListener {
     // 书签树
     private var _outlineTree: ?PdfOutlineTree = None
 
+    // 页面事件监听器
+    private var _pageEvent: ?PdfPageEvent = None
+
     // PDF 版本
     public static let PDF_VERSION_1_4 = "1.4"
     public static let PDF_VERSION_1_5 = "1.5"
@@ -130,6 +133,9 @@ public class PdfWriter <: DocListener {
             case None => ()
         }
 
+        // 通知文档打开
+        fireOnOpenDocument()
+
         // 开始第一页
         newPage()
     }
@@ -164,6 +170,9 @@ public class PdfWriter <: DocListener {
     public func close(): Unit {
         // 完成当前页面
         finishCurrentPage()
+
+        // 通知文档关闭
+        fireOnCloseDocument()
 
         // 写入延迟的字体文件（此时所有字形已经标记完毕，generateSubsetFont 会填充 glyphMapping）
         for (pending in _pendingFontFiles) {
@@ -287,6 +296,9 @@ public class PdfWriter <: DocListener {
         _currentPageAnnots = ArrayList<PdfAnnotation>()
         _currentPageFormFields = ArrayList<PdfFormField>()
 
+        // 通知新页面开始
+        fireOnStartPage()
+
         true
     }
 
@@ -302,6 +314,75 @@ public class PdfWriter <: DocListener {
      */
     public func addFormField(field: PdfFormField): Unit {
         _currentPageFormFields.add(field)
+    }
+
+    /**
+     * 注册页面事件监听器
+     */
+    public func setPageEvent(event: PdfPageEvent): Unit {
+        this._pageEvent = Some(event)
+    }
+
+    // ===== 页面事件 fire helpers =====
+
+    private func fireOnOpenDocument(): Unit {
+        match (_pageEvent) {
+            case Some(ev) => match (_document) {
+                case Some(doc) => ev.onOpenDocument(this, doc)
+                case None => ()
+            }
+            case None => ()
+        }
+    }
+
+    private func fireOnCloseDocument(): Unit {
+        match (_pageEvent) {
+            case Some(ev) => match (_document) {
+                case Some(doc) => ev.onCloseDocument(this, doc)
+                case None => ()
+            }
+            case None => ()
+        }
+    }
+
+    private func fireOnStartPage(): Unit {
+        match (_pageEvent) {
+            case Some(ev) => match (_document) {
+                case Some(doc) => ev.onStartPage(this, doc)
+                case None => ()
+            }
+            case None => ()
+        }
+    }
+
+    private func fireOnEndPage(): Unit {
+        match (_pageEvent) {
+            case Some(ev) => match (_document) {
+                case Some(doc) => ev.onEndPage(this, doc)
+                case None => ()
+            }
+            case None => ()
+        }
+    }
+
+    private func fireOnParagraph(y: Float32): Unit {
+        match (_pageEvent) {
+            case Some(ev) => match (_document) {
+                case Some(doc) => ev.onParagraph(this, doc, y)
+                case None => ()
+            }
+            case None => ()
+        }
+    }
+
+    private func fireOnParagraphEnd(y: Float32): Unit {
+        match (_pageEvent) {
+            case Some(ev) => match (_document) {
+                case Some(doc) => ev.onParagraphEnd(this, doc, y)
+                case None => ()
+            }
+            case None => ()
+        }
     }
 
     /**
@@ -436,6 +517,9 @@ public class PdfWriter <: DocListener {
     }
 
     private func completePage(page: PdfPage): Unit {
+        // 通知页面结束（在内容流写入前，事件处理器仍可绘制）
+        fireOnEndPage()
+
         // 绘制页脚
         match (_footer) {
             case Some(footer) => drawHeaderFooter(footer, false)
@@ -541,6 +625,9 @@ public class PdfWriter <: DocListener {
             newPage()
         }
 
+        // 通知段落开始
+        fireOnParagraph(_currentY)
+
         // 计算段落位置
         let leftX = _marginLeft + para.indentationLeft + para.firstLineIndent
         let rightX = _pageSize.width - _marginRight - para.indentationRight
@@ -559,6 +646,9 @@ public class PdfWriter <: DocListener {
 
         // 段后间距
         _currentY -= para.spacingAfter
+
+        // 通知段落结束
+        fireOnParagraphEnd(_currentY)
 
         true
     }

@@ -71,26 +71,26 @@ public interface PdfPageEvent {
  * 页面事件适配器
  * 提供空实现，便于只覆盖需要的方法
  */
-public open class PdfPageEventAdapter <: PdfPageEvent {
-    public func onOpenDocument(writer: PdfWriter, document: Document): Unit {}
+public open class PdfPageEventHelper <: PdfPageEvent {
+    public open func onOpenDocument(writer: PdfWriter, document: Document): Unit {}
 
-    public func onCloseDocument(writer: PdfWriter, document: Document): Unit {}
+    public open func onCloseDocument(writer: PdfWriter, document: Document): Unit {}
 
-    public func onStartPage(writer: PdfWriter, document: Document): Unit {}
+    public open func onStartPage(writer: PdfWriter, document: Document): Unit {}
 
-    public func onEndPage(writer: PdfWriter, document: Document): Unit {}
+    public open func onEndPage(writer: PdfWriter, document: Document): Unit {}
 
-    public func onParagraph(writer: PdfWriter, document: Document, paragraphPosition: Float32): Unit {}
+    public open func onParagraph(writer: PdfWriter, document: Document, paragraphPosition: Float32): Unit {}
 
-    public func onParagraphEnd(writer: PdfWriter, document: Document, paragraphPosition: Float32): Unit {}
+    public open func onParagraphEnd(writer: PdfWriter, document: Document, paragraphPosition: Float32): Unit {}
 
-    public func onChapter(writer: PdfWriter, document: Document, paragraphPosition: Float32, title: String): Unit {}
+    public open func onChapter(writer: PdfWriter, document: Document, paragraphPosition: Float32, title: String): Unit {}
 
-    public func onChapterEnd(writer: PdfWriter, document: Document, paragraphPosition: Float32): Unit {}
+    public open func onChapterEnd(writer: PdfWriter, document: Document, paragraphPosition: Float32): Unit {}
 
-    public func onSection(writer: PdfWriter, document: Document, paragraphPosition: Float32, depth: Int32, title: String): Unit {}
+    public open func onSection(writer: PdfWriter, document: Document, paragraphPosition: Float32, depth: Int32, title: String): Unit {}
 
-    public func onSectionEnd(writer: PdfWriter, document: Document, paragraphPosition: Float32): Unit {}
+    public open func onSectionEnd(writer: PdfWriter, document: Document, paragraphPosition: Float32): Unit {}
 
-    public func onGenericTag(writer: PdfWriter, document: Document, rect: Rectangle, text: String): Unit {}
+    public open func onGenericTag(writer: PdfWriter, document: Document, rect: Rectangle, text: String): Unit {}
 }
