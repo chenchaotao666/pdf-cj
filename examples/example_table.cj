@@ -282,6 +282,117 @@ public func exampleTableNested(): Unit {
 }
 
 /**
+ * 示例5：跨行表格（rowspan）
+ */
+public func exampleTableRowspan(): Unit {
+    try {
+        println("示例5：跨行表格...")
+
+        let document = Document(PageSize.A4)
+        let file = File(Path("output/example_table_rowspan.pdf"), OpenMode.Write)
+        let writer = PdfWriter.getInstance(document, file)
+        document.addTitle("PDF-CJ 跨行表格")
+        document.open()
+
+        let titleFont  = cjkBold(16.0)
+        let headerFont = cjkBold(11.0)
+        let dataFont   = cjkFont(10.0)
+
+        let title = Paragraph("跨行表格演示（Rowspan + Colspan）", titleFont)
+        title.setAlignment(Alignment.Center)
+        title.setSpacingAfter(20.0)
+        document.add(title)
+
+        // 4 列：季度 | 华北 | 华东 | 华南
+        let table = PdfPTable(4)
+        table.setWidthPercentage(100.0)
+        table.setSpacingBefore(10.0)
+
+        // 大标题行（colspan=4）
+        let topCell = PdfPCell(Phrase("2024年度区域销售报表", cjkBold(13.0)))
+        topCell.setColspan(4)
+        topCell.setHorizontalAlignment(Alignment.Center)
+        topCell.setBackgroundColor(Color(52, 152, 219))
+        topCell.setPadding(10.0)
+        table.addCell(topCell)
+
+        // 表头行
+        for (h in ["季度", "华北", "华东", "华南"]) {
+            let cell = PdfPCell(Phrase(h, headerFont))
+            cell.setHorizontalAlignment(Alignment.Center)
+            cell.setBackgroundColor(Color(189, 195, 199))
+            cell.setPadding(6.0)
+            table.addCell(cell)
+        }
+
+        // 上半年（rowspan=2 跨 Q1/Q2）
+        let h1Cell = PdfPCell(Phrase("上半年", headerFont))
+        h1Cell.setRowspan(2)
+        h1Cell.setHorizontalAlignment(Alignment.Center)
+        h1Cell.setVerticalAlignment(VerticalAlignment.Middle)
+        h1Cell.setBackgroundColor(Color(236, 240, 241))
+        h1Cell.setPadding(6.0)
+        table.addCell(h1Cell)
+
+        // Q1 数据
+        for (v in ["1,200", "1,500", "980"]) {
+            let cell = PdfPCell(Phrase(v, dataFont))
+            cell.setHorizontalAlignment(Alignment.Center)
+            cell.setPadding(5.0)
+            table.addCell(cell)
+        }
+        // Q2 数据（紧接 rowspan 单元格后填充，col0 被占用）
+        for (v in ["1,350", "1,620", "1,050"]) {
+            let cell = PdfPCell(Phrase(v, dataFont))
+            cell.setHorizontalAlignment(Alignment.Center)
+            cell.setBackgroundColor(Color(249, 249, 249))
+            cell.setPadding(5.0)
+            table.addCell(cell)
+        }
+
+        // 下半年（rowspan=2 跨 Q3/Q4）
+        let h2Cell = PdfPCell(Phrase("下半年", headerFont))
+        h2Cell.setRowspan(2)
+        h2Cell.setHorizontalAlignment(Alignment.Center)
+        h2Cell.setVerticalAlignment(VerticalAlignment.Middle)
+        h2Cell.setBackgroundColor(Color(236, 240, 241))
+        h2Cell.setPadding(6.0)
+        table.addCell(h2Cell)
+
+        // Q3 数据
+        for (v in ["1,480", "1,750", "1,180"]) {
+            let cell = PdfPCell(Phrase(v, dataFont))
+            cell.setHorizontalAlignment(Alignment.Center)
+            cell.setPadding(5.0)
+            table.addCell(cell)
+        }
+        // Q4 数据
+        for (v in ["1,600", "1,850", "1,280"]) {
+            let cell = PdfPCell(Phrase(v, dataFont))
+            cell.setHorizontalAlignment(Alignment.Center)
+            cell.setBackgroundColor(Color(249, 249, 249))
+            cell.setPadding(5.0)
+            table.addCell(cell)
+        }
+
+        // 年合计行（colspan=4）
+        let totalCell = PdfPCell(Phrase("年合计：华北 5,630 | 华东 6,720 | 华南 4,490", headerFont))
+        totalCell.setColspan(4)
+        totalCell.setHorizontalAlignment(Alignment.Center)
+        totalCell.setBackgroundColor(Color(236, 240, 241))
+        totalCell.setPadding(8.0)
+        table.addCell(totalCell)
+
+        document.add(table)
+        document.close()
+        file.close()
+        println("✓ 成功创建: output/example_table_rowspan.pdf")
+    } catch (e: Exception) {
+        println("✗ 错误: ${e.message}")
+    }
+}
+
+/**
  * 主函数
  */
 main(): Int64 {
@@ -291,6 +402,7 @@ main(): Int64 {
     exampleTableStyled()
     exampleTableComplex()
     exampleTableNested()
+    exampleTableRowspan()
 
     println("\n=== 验证完成 ===")
     println("请检查 output/ 目录中的 PDF 文件")

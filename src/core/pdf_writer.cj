@@ -1023,13 +1023,10 @@ public class PdfWriter <: DocListener {
      * 处理表格
      */
     private func processTable(table: PdfPTable): Bool {
-        // 确保最后一行已完成
         table.completeRow()
 
-        // 表前间距
         _currentY -= table.spacingBefore
 
-        // 计算表格宽度
         let pageWidth = _pageSize.width - _marginLeft - _marginRight
         let tableWidth = if (table.lockedWidth) {
             table.totalWidth
@@ -1037,7 +1034,6 @@ public class PdfWriter <: DocListener {
             pageWidth * (table.widthPercentage / 100.0)
         }
 
-        // 计算表格起始 X 坐标（根据对齐方式）
         let tableX = match (table.horizontalAlignment) {
             case Left => _marginLeft
             case Center => _marginLeft + (pageWidth - tableWidth) / 2.0
@@ -1045,117 +1041,125 @@ public class PdfWriter <: DocListener {
             case _ => _marginLeft
         }
 
-        // 计算列宽
         let columnWidths = calculateColumnWidths(table, tableWidth)
+        let rowCount = table.rowCount
 
-        // 绘制所有行
-        var rowIndex: Int32 = 0
-        while (rowIndex < table.rowCount) {
-            let rowOpt = table.getRow(rowIndex)
+        // 预计算所有行高（rowspan 单元格渲染时需要累加多行高度）
+        let rowHeights = Array<Float32>(Int64(rowCount), {_ => 0.0})
+        var ri: Int32 = 0
+        while (ri < rowCount) {
+            let rowOpt = table.getRow(ri)
             if (rowOpt.isSome()) {
-                let row = rowOpt.getOrThrow()
-
-                // 计算行高
-                let rowHeight = calculateRowHeight(row, columnWidths)
-
-                // 检查是否需要分页
-                if (_currentY - rowHeight < _marginBottom) {
-                    newPage()
-                }
-
-                // 绘制行
-                drawRow(row, tableX, _currentY, columnWidths, rowHeight, table.columns)
-
-                // 更新 Y 位置
-                _currentY -= rowHeight
+                rowHeights[Int64(ri)] = calculateRowHeight(rowOpt.getOrThrow(), columnWidths)
             }
-            rowIndex += 1
+            ri += 1
         }
 
-        // 表后间距
-        _currentY -= table.spacingAfter
+        // 绘制所有行
+        var rowIdx: Int32 = 0
+        while (rowIdx < rowCount) {
+            let rowH = rowHeights[Int64(rowIdx)]
+            if (_currentY - rowH < _marginBottom) {
+                newPage()
+            }
+            let rowOpt2 = table.getRow(rowIdx)
+            if (rowOpt2.isSome()) {
+                drawRowWithRowspan(rowOpt2.getOrThrow(), tableX, _currentY, columnWidths, rowH,
+                                   rowHeights, rowIdx, rowCount)
+            }
+            _currentY -= rowH
+            rowIdx += 1
+        }
 
+        _currentY -= table.spacingAfter
         true
+    }
+
+    /**
+     * 在指定坐标绘制表格的指定行范围，返回绘制后的 Y 坐标
+     * @param table 目标表格（已调用 completeRow）
+     * @param firstRow 起始行（含），0-based
+     * @param lastRow 结束行（不含），-1 表示到最后一行
+     * @param x 左边 X 坐标
+     * @param y 顶部 Y 坐标
+     * @return 绘制后的 Y 坐标（最后一行底部）
+     */
+    public func writeSelectedRows(table: PdfPTable, firstRow: Int32, lastRow: Int32,
+                                  x: Float32, y: Float32): Float32 {
+        let rowCount = table.rowCount
+        let actualLast = if (lastRow < 0 || lastRow > rowCount) { rowCount } else { lastRow }
+
+        let columnWidths = if (table.lockedWidth) {
+            table.getAbsoluteColumnWidths(table.totalWidth)
+        } else {
+            let pageWidth = _pageSize.width - _marginLeft - _marginRight
+            table.getAbsoluteColumnWidths(pageWidth * (table.widthPercentage / 100.0))
+        }
+
+        // 预计算所有行高
+        let rowHeights = Array<Float32>(Int64(rowCount), {_ => 0.0})
+        var ri: Int32 = 0
+        while (ri < rowCount) {
+            let rowOpt = table.getRow(ri)
+            if (rowOpt.isSome()) {
+                rowHeights[Int64(ri)] = calculateRowHeight(rowOpt.getOrThrow(), columnWidths)
+            }
+            ri += 1
+        }
+
+        var currentY = y
+        var rowIdx = firstRow
+        while (rowIdx < actualLast) {
+            let rowH = rowHeights[Int64(rowIdx)]
+            let rowOpt2 = table.getRow(rowIdx)
+            if (rowOpt2.isSome()) {
+                drawRowWithRowspan(rowOpt2.getOrThrow(), x, currentY, columnWidths, rowH,
+                                   rowHeights, rowIdx, rowCount)
+            }
+            currentY -= rowH
+            rowIdx += 1
+        }
+        currentY
     }
 
     /**
      * 计算列宽
      */
     private func calculateColumnWidths(table: PdfPTable, totalWidth: Float32): Array<Float32> {
-        let numColumns = table.columns
-        Array<Float32>(Int64(numColumns), {_ => totalWidth / Float32(numColumns)})
+        table.getAbsoluteColumnWidths(totalWidth)
     }
 
     /**
-     * 计算行高
+     * 计算行高（colspan 感知，使用 cell.calculateHeight 精确换行估算）
      */
     private func calculateRowHeight(row: PdfPRow, columnWidths: Array<Float32>): Float32 {
         var maxHeight: Float32 = 0.0
-
-        var cellIndex: Int32 = 0
-        while (cellIndex < row.cellCount) {
-            let cellOpt = row.getCell(cellIndex)
+        var cellIdx: Int32 = 0
+        while (cellIdx < row.cellCount) {
+            let cellOpt = row.getCell(cellIdx)
             if (cellOpt.isSome()) {
                 let cell = cellOpt.getOrThrow()
-                let height = calculateCellHeight(cell, columnWidths[Int64(cellIndex)])
-                if (height > maxHeight) {
-                    maxHeight = height
+                // rowspan > 1 的单元格不参与本行高度计算（其高度由跨行累计决定）
+                if (cell.rowspan == 1) {
+                    let colStart = row.getColumnPosition(cellIdx)
+                    var cellWidth: Float32 = 0.0
+                    var s: Int32 = 0
+                    while (s < cell.colspan && (colStart + s) < Int32(columnWidths.size)) {
+                        cellWidth += columnWidths[Int64(colStart + s)]
+                        s += 1
+                    }
+                    let h = cell.calculateHeight(cellWidth)
+                    if (h > maxHeight) {
+                        maxHeight = h
+                    }
                 }
             }
-            cellIndex += 1
+            cellIdx += 1
         }
-
-        if (maxHeight < 20.0) {
-            maxHeight = 20.0  // 最小行高
+        if (maxHeight < 14.0) {
+            maxHeight = 14.0
         }
-
         maxHeight
-    }
-
-    /**
-     * 计算单元格高度
-     */
-    private func calculateCellHeight(cell: PdfPCell, width: Float32): Float32 {
-        // 固定高度
-        if (cell.fixedHeight > 0.0) {
-            return cell.fixedHeight
-        }
-
-        // 估算内容高度
-        var contentHeight: Float32 = 0.0
-
-        // 处理 Phrase
-        if (cell.phrase.isSome()) {
-            let phrase = cell.phrase.getOrThrow()
-            contentHeight = phrase.leading + 5.0
-        }
-
-        // 处理内容元素
-        var i: Int64 = 0
-        while (i < cell.contentSize) {
-            contentHeight += getElementHeight(cell.getContentElement(i))
-            i += 1
-        }
-
-        // 添加内边距
-        contentHeight += cell.paddingTop + cell.paddingBottom
-
-        // 应用最小高度
-        if (contentHeight < cell.minimumHeight) {
-            contentHeight = cell.minimumHeight
-        }
-
-        contentHeight
-    }
-
-    /**
-     * 获取元素高度
-     */
-    private func getElementHeight(elem: Element): Float32 {
-        match (elem) {
-            case para: Paragraph => para.leading + 5.0
-            case _ => 15.0
-        }
     }
 
     /**
@@ -1186,41 +1190,49 @@ public class PdfWriter <: DocListener {
     }
 
     /**
-     * 绘制行
+     * 绘制行（支持 colspan 和 rowspan）
+     * rowspan > 1 的单元格高度 = 所跨各行高度之和
      */
-    private func drawRow(row: PdfPRow, startX: Float32, startY: Float32,
-                         columnWidths: Array<Float32>, rowHeight: Float32, numColumns: Int32): Unit {
-        var currentX = startX
-        var columnPos: Int32 = 0  // 当前列位置
-        var cellArrayIndex: Int32 = 0  // 单元格数组索引
-
-        while (columnPos < numColumns && cellArrayIndex < row.cellCount) {
-            let cellOpt = row.getCell(cellArrayIndex)
-
+    private func drawRowWithRowspan(row: PdfPRow, startX: Float32, startY: Float32,
+                                    columnWidths: Array<Float32>, rowHeight: Float32,
+                                    rowHeights: Array<Float32>, rowIdx: Int32, totalRows: Int32): Unit {
+        var cellIdx: Int32 = 0
+        while (cellIdx < row.cellCount) {
+            let cellOpt = row.getCell(cellIdx)
             if (cellOpt.isSome()) {
                 let cell = cellOpt.getOrThrow()
-                let colspan = cell.colspan
+                let colStart = row.getColumnPosition(cellIdx)
 
-                // 计算跨列单元格的总宽度
+                // 计算该单元格跨列总宽度
                 var cellWidth: Float32 = 0.0
-                var spanIdx: Int32 = 0
-                while (spanIdx < colspan && (columnPos + spanIdx) < numColumns) {
-                    cellWidth += columnWidths[Int64(columnPos + spanIdx)]
-                    spanIdx += 1
+                var s: Int32 = 0
+                while (s < cell.colspan && (colStart + s) < Int32(columnWidths.size)) {
+                    cellWidth += columnWidths[Int64(colStart + s)]
+                    s += 1
                 }
 
-                drawCell(cell, currentX, startY, cellWidth, rowHeight)
+                // 计算该单元格的 X 起始坐标
+                var cellX: Float32 = startX
+                var c: Int32 = 0
+                while (c < colStart && c < Int32(columnWidths.size)) {
+                    cellX += columnWidths[Int64(c)]
+                    c += 1
+                }
 
-                // 更新位置
-                currentX += cellWidth
-                columnPos += colspan
-                cellArrayIndex += 1
-            } else {
-                // 空单元格（不应该发生，但作为安全检查）
-                currentX += columnWidths[Int64(columnPos)]
-                columnPos += 1
-                cellArrayIndex += 1
+                // rowspan > 1：高度为所跨各行高度之和
+                var cellHeight: Float32 = rowHeight
+                if (cell.rowspan > 1) {
+                    cellHeight = 0.0
+                    var r: Int32 = rowIdx
+                    while (r < rowIdx + cell.rowspan && r < totalRows) {
+                        cellHeight += rowHeights[Int64(r)]
+                        r += 1
+                    }
+                }
+
+                drawCell(cell, cellX, startY, cellWidth, cellHeight)
             }
+            cellIdx += 1
         }
     }
 

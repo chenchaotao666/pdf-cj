@@ -409,6 +409,56 @@ public class PdfPCell <: Element {
         get() { _noWrap }
     }
 
+    /**
+     * 计算单元格高度（考虑文本换行）
+     */
+    public func calculateHeight(cellWidth: Float32): Float32 {
+        if (_fixedHeight > 0.0) {
+            return _fixedHeight
+        }
+
+        let availW = cellWidth - _paddingLeft - _paddingRight
+        var height: Float32 = _paddingTop + _paddingBottom
+
+        match (_phrase) {
+            case Some(p) =>
+                height += estimateWrappedHeight(p.getWidth(), p.leading, availW)
+            case None => ()
+        }
+
+        var i: Int64 = 0
+        while (i < _content.size) {
+            match (_content[i]) {
+                case para: Paragraph =>
+                    height += para.spacingBefore
+                    height += estimateWrappedHeight(para.getWidth(), para.leading, availW)
+                    height += para.spacingAfter
+                case _ =>
+                    height += 14.0
+            }
+            i += 1
+        }
+
+        if (height < _minimumHeight) {
+            height = _minimumHeight
+        }
+        if (height < 14.0) {
+            height = 14.0
+        }
+        height
+    }
+
+    private func estimateWrappedHeight(textWidth: Float32, leading: Float32, availWidth: Float32): Float32 {
+        if (availWidth <= 0.0 || textWidth <= 0.0) {
+            return leading
+        }
+        if (textWidth <= availWidth) {
+            return leading
+        }
+        let lines = Float32(Int64(textWidth / availWidth)) + 1.0
+        lines * leading
+    }
+
     // ===== Element 接口实现 =====
 
     public func getType(): ElementType {

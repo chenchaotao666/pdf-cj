@@ -1,6 +1,6 @@
 /**
  * PDF-CJ: PdfPTable - PDF 表格
- * 高级表格类，支持自动布局、跨页等功能
+ * 高级表格类，支持自动布局、跨列、跨行等功能
  */
 package pdf_cj.table
 
@@ -11,13 +11,17 @@ import pdf_cj.util.PdfException
 
 /**
  * PdfPTable 类 - PDF 表格
- * 支持多列、自动布局、表头重复等高级功能
+ * 支持多列、自动布局、colspan、rowspan、表头重复等功能
  */
 public class PdfPTable <: Element {
     private let _numColumns: Int32
     private var _rows: ArrayList<PdfPRow> = ArrayList<PdfPRow>()
     private var _currentRow: ArrayList<PdfPCell> = ArrayList<PdfPCell>()
-    private var _currentRowSpan: Int32 = 0  // 当前行已占用的列数（考虑 colspan）
+    private var _currentRowStartCols: ArrayList<Int32> = ArrayList<Int32>()
+    private var _currentRowSpan: Int32 = 0
+
+    // 跨行追踪器：每列剩余被占用的行数（由 rowspan 产生）
+    private var _rowspanTracker: Array<Int32> = Array<Int32>(0, {_ => 0})
 
     // 宽度设置
     private var _widthPercentage: Float32 = 80.0
@@ -44,7 +48,7 @@ public class PdfPTable <: Element {
     private var _spacingBefore: Float32 = 0.0
     private var _spacingAfter: Float32 = 0.0
 
-    // 默认单元格（用于设置默认样式）
+    // 默认单元格
     private var _defaultCell: PdfPCell = PdfPCell()
 
     /**
@@ -55,6 +59,7 @@ public class PdfPTable <: Element {
             throw PdfException("Table must have at least one column")
         }
         this._numColumns = numColumns
+        this._rowspanTracker = Array<Int32>(Int64(numColumns), {_ => 0})
     }
 
     /**
@@ -66,19 +71,36 @@ public class PdfPTable <: Element {
         }
         this._numColumns = Int32(relativeWidths.size)
         this._relativeWidths = Some(relativeWidths)
+        this._rowspanTracker = Array<Int32>(relativeWidths.size, {_ => 0})
     }
 
     // ===== 单元格添加 =====
 
     /**
-     * 添加单元格
+     * 添加单元格（支持 colspan 和 rowspan）
      */
     public func addCell(cell: PdfPCell): Unit {
-        _currentRow.add(cell)
-        _currentRowSpan += cell.colspan
+        // 从当前位置向后探测第一个空闲列（未被 rowspan 占用）
+        var startCol: Int32 = _currentRowSpan
+        while (startCol < _numColumns && _rowspanTracker[Int64(startCol)] > 0) {
+            startCol += 1
+        }
 
-        // 如果当前行已满（考虑 colspan），创建新行
-        if (_currentRowSpan >= _numColumns) {
+        _currentRowStartCols.add(startCol)
+        _currentRow.add(cell)
+
+        // 为 rowspan > 1 的单元格标记后续行的占用状态
+        if (cell.rowspan > 1) {
+            var c: Int32 = 0
+            while (c < cell.colspan && (startCol + c) < _numColumns) {
+                _rowspanTracker[Int64(startCol + c)] = cell.rowspan
+                c += 1
+            }
+        }
+
+        _currentRowSpan = startCol + cell.colspan
+
+        if (isCurrentRowComplete()) {
             completeRow()
         }
     }
@@ -105,22 +127,55 @@ public class PdfPTable <: Element {
     }
 
     /**
-     * 完成当前行
+     * 完成当前行（填充剩余空闲列）
      */
     public func completeRow(): Unit {
         if (_currentRow.isEmpty()) {
             return
         }
 
-        // 如果当前行不足列数，用空单元格填充
-        while (_currentRowSpan < _numColumns) {
-            _currentRow.add(PdfPCell())
-            _currentRowSpan += 1
+        // 填充当前行中未被 rowspan 占用的剩余空列
+        var col: Int32 = _currentRowSpan
+        while (col < _numColumns) {
+            if (_rowspanTracker[Int64(col)] == 0) {
+                _currentRowStartCols.add(col)
+                _currentRow.add(PdfPCell())
+            }
+            col += 1
         }
 
-        _rows.add(PdfPRow(_currentRow))
+        _rows.add(PdfPRow(_currentRow, _currentRowStartCols))
         _currentRow = ArrayList<PdfPCell>()
-        _currentRowSpan = 0  // 重置列跨度计数
+        _currentRowStartCols = ArrayList<Int32>()
+
+        // 递减跨行计数（本行消耗一层 rowspan）
+        var c: Int32 = 0
+        while (c < _numColumns) {
+            if (_rowspanTracker[Int64(c)] > 0) {
+                _rowspanTracker[Int64(c)] -= 1
+            }
+            c += 1
+        }
+
+        // 定位下一行的起始空闲列
+        _currentRowSpan = 0
+        while (_currentRowSpan < _numColumns && _rowspanTracker[Int64(_currentRowSpan)] > 0) {
+            _currentRowSpan += 1
+        }
+    }
+
+    /**
+     * 判断当前行是否已填满（含 rowspan 占用列）
+     */
+    private func isCurrentRowComplete(): Bool {
+        var col: Int32 = _currentRowSpan
+        while (col < _numColumns) {
+            if (_rowspanTracker[Int64(col)] == 0) {
+                return false
+            }
+            col += 1
+        }
+        true
     }
 
     /**
@@ -143,71 +198,73 @@ public class PdfPTable <: Element {
         }
     }
 
-    // ===== 宽度设置 =====
+    // ===== 列宽计算 =====
 
     /**
-     * 设置宽度百分比
+     * 计算绝对列宽数组
+     * 优先级：绝对列宽 > 相对列宽 > 等分
      */
+    public func getAbsoluteColumnWidths(totalWidth: Float32): Array<Float32> {
+        match (_columnWidths) {
+            case Some(widths) => return widths
+            case None => ()
+        }
+        match (_relativeWidths) {
+            case Some(relWidths) =>
+                var sum: Float32 = 0.0
+                for (w in relWidths) {
+                    sum += w
+                }
+                if (sum <= 0.0) {
+                    sum = 1.0
+                }
+                let scale = totalWidth / sum
+                return Array<Float32>(relWidths.size, {i => relWidths[i] * scale})
+            case None => ()
+        }
+        Array<Float32>(Int64(_numColumns), {_ => totalWidth / Float32(_numColumns)})
+    }
+
+    // ===== 宽度设置 =====
+
     public func setWidthPercentage(percentage: Float32): Unit {
         this._widthPercentage = percentage
     }
 
-    /**
-     * 获取宽度百分比
-     */
     public prop widthPercentage: Float32 {
         get() { _widthPercentage }
     }
 
-    /**
-     * 设置总宽度
-     */
     public func setTotalWidth(width: Float32): Unit {
         this._totalWidth = width
         this._lockedWidth = true
     }
 
-    /**
-     * 设置列宽（绝对宽度）
-     */
     public func setTotalWidth(widths: Array<Float32>): Unit {
         if (Int32(widths.size) != _numColumns) {
             throw PdfException("Wrong number of column widths")
         }
         this._columnWidths = Some(widths)
-
         var total: Float32 = 0.0
         for (w in widths) {
-            total = total + w
+            total += w
         }
         this._totalWidth = total
         this._lockedWidth = true
     }
 
-    /**
-     * 获取总宽度
-     */
     public prop totalWidth: Float32 {
         get() { _totalWidth }
     }
 
-    /**
-     * 设置是否锁定宽度
-     */
     public func setLockedWidth(locked: Bool): Unit {
         this._lockedWidth = locked
     }
 
-    /**
-     * 获取是否锁定宽度
-     */
     public prop lockedWidth: Bool {
         get() { _lockedWidth }
     }
 
-    /**
-     * 设置相对列宽
-     */
     public func setWidths(relativeWidths: Array<Float32>): Unit {
         if (Int32(relativeWidths.size) != _numColumns) {
             throw PdfException("Wrong number of column widths")
@@ -217,164 +274,98 @@ public class PdfPTable <: Element {
 
     // ===== 对齐方式 =====
 
-    /**
-     * 设置水平对齐
-     */
     public func setHorizontalAlignment(alignment: Alignment): Unit {
         this._horizontalAlignment = alignment
     }
 
-    /**
-     * 设置水平对齐（整数）
-     */
     public func setHorizontalAlignment(alignment: Int32): Unit {
         this._horizontalAlignment = Alignment.fromInt(alignment)
     }
 
-    /**
-     * 获取水平对齐
-     */
     public prop horizontalAlignment: Alignment {
         get() { _horizontalAlignment }
     }
 
     // ===== 表头设置 =====
 
-    /**
-     * 设置表头行数
-     */
     public func setHeaderRows(rows: Int32): Unit {
         this._headerRows = rows
     }
 
-    /**
-     * 获取表头行数
-     */
     public prop headerRows: Int32 {
         get() { _headerRows }
     }
 
-    /**
-     * 设置页脚行数
-     */
     public func setFooterRows(rows: Int32): Unit {
         this._footerRows = rows
     }
 
-    /**
-     * 获取页脚行数
-     */
     public prop footerRows: Int32 {
         get() { _footerRows }
     }
 
-    /**
-     * 设置跳过第一个表头
-     */
     public func setSkipFirstHeader(skip: Bool): Unit {
         this._skipFirstHeader = skip
     }
 
-    /**
-     * 获取是否跳过第一个表头
-     */
     public prop skipFirstHeader: Bool {
         get() { _skipFirstHeader }
     }
 
-    /**
-     * 设置跳过最后一个页脚
-     */
     public func setSkipLastFooter(skip: Bool): Unit {
         this._skipLastFooter = skip
     }
 
-    /**
-     * 获取是否跳过最后一个页脚
-     */
     public prop skipLastFooter: Bool {
         get() { _skipLastFooter }
     }
 
     // ===== 分页设置 =====
 
-    /**
-     * 设置是否保持在一页
-     */
     public func setKeepTogether(keep: Bool): Unit {
         this._keepTogether = keep
     }
 
-    /**
-     * 获取是否保持在一页
-     */
     public prop keepTogether: Bool {
         get() { _keepTogether }
     }
 
-    /**
-     * 设置是否延迟拆分
-     */
     public func setSplitLate(splitLate: Bool): Unit {
         this._splitLate = splitLate
     }
 
-    /**
-     * 获取是否延迟拆分
-     */
     public prop splitLate: Bool {
         get() { _splitLate }
     }
 
-    /**
-     * 设置是否允许拆分行
-     */
     public func setSplitRows(splitRows: Bool): Unit {
         this._splitRows = splitRows
     }
 
-    /**
-     * 获取是否允许拆分行
-     */
     public prop splitRows: Bool {
         get() { _splitRows }
     }
 
     // ===== 间距设置 =====
 
-    /**
-     * 设置前间距
-     */
     public func setSpacingBefore(spacing: Float32): Unit {
         this._spacingBefore = spacing
     }
 
-    /**
-     * 获取前间距
-     */
     public prop spacingBefore: Float32 {
         get() { _spacingBefore }
     }
 
-    /**
-     * 设置后间距
-     */
     public func setSpacingAfter(spacing: Float32): Unit {
         this._spacingAfter = spacing
     }
 
-    /**
-     * 获取后间距
-     */
     public prop spacingAfter: Float32 {
         get() { _spacingAfter }
     }
 
     // ===== 默认单元格 =====
 
-    /**
-     * 获取默认单元格（用于设置默认样式）
-     */
     public func getDefaultCell(): PdfPCell {
         _defaultCell
     }
@@ -386,7 +377,6 @@ public class PdfPTable <: Element {
     }
 
     public func getChunks(): ArrayList<Chunk> {
-        // 表格没有直接的 Chunk
         ArrayList<Chunk>()
     }
 
@@ -404,23 +394,14 @@ public class PdfPTable <: Element {
 
     // ===== 属性访问 =====
 
-    /**
-     * 获取列数
-     */
     public prop columns: Int32 {
         get() { _numColumns }
     }
 
-    /**
-     * 获取行数
-     */
     public prop rowCount: Int32 {
         get() { Int32(_rows.size) }
     }
 
-    /**
-     * 获取指定行
-     */
     public func getRow(index: Int32): ?PdfPRow {
         if (index >= 0 && index < Int32(_rows.size)) {
             Some(_rows[Int64(index)])
@@ -429,9 +410,6 @@ public class PdfPTable <: Element {
         }
     }
 
-    /**
-     * 获取所有行
-     */
     public func getRows(): ArrayList<PdfPRow> {
         _rows
     }
@@ -439,23 +417,36 @@ public class PdfPTable <: Element {
 
 /**
  * PdfPRow 类 - 表格行
- * 内部使用，表示表格的一行
+ * 内部使用，记录单元格及每个单元格的起始列位置
  */
 public class PdfPRow {
     private let _cells: ArrayList<PdfPCell>
+    private let _columnPositions: ArrayList<Int32>
     private var _maxHeight: Float32 = 0.0
     private var _calculated: Bool = false
 
     /**
-     * 使用单元格列表创建行
+     * 带列位置信息创建行（推荐）
      */
-    public init(cells: ArrayList<PdfPCell>) {
+    public init(cells: ArrayList<PdfPCell>, positions: ArrayList<Int32>) {
         this._cells = cells
+        this._columnPositions = positions
     }
 
     /**
-     * 获取指定列的单元格
+     * 仅提供单元格时，按 colspan 顺序推导列位置（兼容旧接口）
      */
+    public init(cells: ArrayList<PdfPCell>) {
+        this._cells = cells
+        let positions = ArrayList<Int32>()
+        var col: Int32 = 0
+        for (cell in cells) {
+            positions.add(col)
+            col += cell.colspan
+        }
+        this._columnPositions = positions
+    }
+
     public func getCell(index: Int32): ?PdfPCell {
         if (index >= 0 && index < Int32(_cells.size)) {
             Some(_cells[Int64(index)])
@@ -465,37 +456,33 @@ public class PdfPRow {
     }
 
     /**
-     * 获取单元格数量
+     * 获取指定单元格（按数组下标）的起始列号
      */
+    public func getColumnPosition(cellIndex: Int32): Int32 {
+        if (cellIndex >= 0 && Int64(cellIndex) < _columnPositions.size) {
+            _columnPositions[Int64(cellIndex)]
+        } else {
+            0
+        }
+    }
+
     public prop cellCount: Int32 {
         get() { Int32(_cells.size) }
     }
 
-    /**
-     * 设置最大高度
-     */
     public func setMaxHeight(height: Float32): Unit {
         this._maxHeight = height
         this._calculated = true
     }
 
-    /**
-     * 获取最大高度
-     */
     public prop maxHeight: Float32 {
         get() { _maxHeight }
     }
 
-    /**
-     * 是否已计算高度
-     */
     public prop isCalculated: Bool {
         get() { _calculated }
     }
 
-    /**
-     * 获取所有单元格
-     */
     public func getCells(): ArrayList<PdfPCell> {
         _cells
     }
