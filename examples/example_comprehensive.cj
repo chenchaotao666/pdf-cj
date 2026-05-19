@@ -10,7 +10,7 @@ main() {
     println("开始创建 PDF 文档...")
 
     // 1. 创建文档和输出流
-    let output = File(Path("example_comprehensive.pdf"), OpenMode.Write)
+    let output = File(Path("output/example_comprehensive.pdf"), OpenMode.Write)
     let document = Document(PageSize.A4, 50.0, 50.0, 50.0, 50.0)
     let writer = PdfWriter.getInstance(document, output)
 
@@ -474,6 +474,6 @@ main() {
     document.close()
     output.close()
 
-    println("PDF 文档创建完成：example_comprehensive.pdf")
+    println("PDF 文档创建完成：output/example_comprehensive.pdf")
     println("✓ 已演示：文本、段落、表格、图片、编码、页眉页脚等功能")
 }

@@ -7,7 +7,6 @@ import pdf_cj.api.{Document, Paragraph}
 import pdf_cj.core.PdfWriter
 import pdf_cj.security.*
 import pdf_cj.util.PageSize
-import std.io.{File, FileMode}
 import std.fs.Path
 
 /**

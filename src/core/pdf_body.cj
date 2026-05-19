@@ -104,7 +104,7 @@ public class PdfBody {
 
         // 写入对象数量 (包括对象0)
         outputStream.writeString("0 ")
-        outputStream.writeInt(Int64(currentObjectNumber + 1))
+        outputStream.writeInt(Int64(currentObjectNumber) + 1)
         outputStream.writeNewLine()
 
         // 写入对象0（永久空闲对象）

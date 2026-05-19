@@ -108,6 +108,13 @@ public open class PdfFormField {
     }
 
     /**
+     * 获取控件注释列表
+     */
+    public func getWidgets(): ArrayList<PdfAnnotation> {
+        widgets
+    }
+
+    /**
      * 设置为只读
      */
     public func setReadOnly(readOnly: Bool): Unit {

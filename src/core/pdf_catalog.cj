@@ -68,6 +68,20 @@ public class PdfCatalog {
     }
 
     /**
+     * 设置大纲/书签根节点引用
+     */
+    public func setOutlines(ref: PdfIndirectReference): Unit {
+        _dictionary.put(PdfName("Outlines"), ref)
+    }
+
+    /**
+     * 设置 AcroForm 字典
+     */
+    public func setAcroForm(acroForm: PdfDictionary): Unit {
+        _dictionary.put(PdfName("AcroForm"), acroForm)
+    }
+
+    /**
      * 获取字典
      */
     public prop dictionary: PdfDictionary {

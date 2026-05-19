@@ -32,8 +32,8 @@ public class ASCIIHexEncoder {
             result = result + getHexChar(Int32(low))
         }
 
-        // 添加结束标记
-        result + ">"
+        // 添加结束标记（PDF ASCIIHexDecode 格式：<...>）
+        "<" + result + ">"
     }
 
     /**

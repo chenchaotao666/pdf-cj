@@ -11,7 +11,7 @@ main() {
     println("=" * 50)
 
     // 创建输出文件
-    let outputPath = "example_chinese.pdf"
+    let outputPath = "output/example_chinese.pdf"
     let output = File(Path(outputPath), OpenMode.Write)
 
     // 创建文档
@@ -82,7 +82,7 @@ main() {
     document.close()
     output.close()
 
-    println("✓ PDF 创建成功: ${outputPath}")
+    println("✓ PDF 创建成功: output/example_chinese.pdf")
     println("  文档包含中文内容和格式化文本")
     println("")
     println("注意事项：")

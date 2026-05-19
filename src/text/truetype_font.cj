@@ -39,6 +39,11 @@ public class TrueTypeFont {
     // kern 表：字符对间距调整
     private var kerningPairs: HashMap<UInt32, Int32> = HashMap<UInt32, Int32>()
 
+    // head 表附加字段
+    private var indexToLocFormat: Int32 = 0  // 0=short loca, 1=long loca
+    // maxp
+    private var numGlyphs: Int32 = 0
+
     /**
      * 构造函数
      */
@@ -213,6 +218,13 @@ public class TrueTypeFont {
                 // 读取 unitsPerEm
                 unitsPerEm = Int32(readUInt16(pos))
                 pos += 2
+
+                // 跳过 created(8), modified(8), xMin(2), yMin(2), xMax(2), yMax(2),
+                // macStyle(2), lowestRecPPEM(2), fontDirectionHint(2)
+                pos += 30
+
+                // indexToLocFormat: 0=short, 1=long
+                indexToLocFormat = readInt16(pos)
             case None =>
                 throw PdfException("head table not found")
         }
@@ -256,11 +268,9 @@ public class TrueTypeFont {
     private func readMaxpTable(): Unit {
         match (tables.get("maxp")) {
             case Some(entry) =>
-                // maxp 表包含字体的最大值信息
-                // 简化实现：只读取版本
-                // Table Directory 中的 offset 是绝对偏移
                 let pos = entry.offset
-                let version = readUInt32(pos)
+                // 跳过 version(4)
+                numGlyphs = Int32(readUInt16(pos + 4))
             case None =>
                 throw PdfException("maxp table not found")
         }
@@ -637,6 +647,85 @@ public class TrueTypeFont {
                 // 使用默认宽度
                 ()
         }
+    }
+
+    // ===== 字体子集化所需接口 =====
+
+    /** 是否为 CFF（OpenType）字体（有 CFF 表而无 glyf 表） */
+    public func isCFF(): Bool {
+        tables.contains("CFF ")
+    }
+
+    /** 总字形数（来自 maxp） */
+    public func getNumGlyphs(): Int32 { numGlyphs }
+
+    /** loca 格式：0=short(UInt16*2), 1=long(UInt32) */
+    public func getIndexToLocFormat(): Int32 { indexToLocFormat }
+
+    /** numberOfHMetrics（来自 hhea） */
+    public func getNumberOfHMetrics(): Int32 { numberOfHMetrics }
+
+    /** 返回指定表的原始字节（子集生成时逐表复制用） */
+    public func getRawTable(tag: String): ?Array<UInt8> {
+        match (tables.get(tag)) {
+            case Some(entry) =>
+                let len = entry.length
+                let src = entry.offset
+                if (src + len > fontData.size) { return None }
+                let buf = Array<UInt8>(len, repeat: UInt8(0))
+                for (i in 0..len) { buf[i] = fontData[src + i] }
+                Some(buf)
+            case None => None
+        }
+    }
+
+    /** 返回所有已解析的表名（用于子集时逐一复制） */
+    public func getTableTags(): Array<String> {
+        var tags = ArrayList<String>()
+        for ((tag, _) in tables) { tags.add(tag) }
+        tags.toArray()
+    }
+
+    /**
+     * 获取单个字形在 glyf 表中的原始字节范围 [offset, length]
+     * 从 loca 表读取偏移，再从 glyf 表切片。
+     */
+    public func getGlyphData(glyphId: Int32): Array<UInt8> {
+        let locaEntry = match (tables.get("loca")) {
+            case Some(e) => e
+            case None => return Array<UInt8>(0, repeat: UInt8(0))
+        }
+        let glyfEntry = match (tables.get("glyf")) {
+            case Some(e) => e
+            case None => return Array<UInt8>(0, repeat: UInt8(0))
+        }
+
+        let glyfBase = glyfEntry.offset
+        var glyphOffset: Int64
+        var glyphEnd: Int64
+
+        if (indexToLocFormat == 0) {
+            // short format: offset = UInt16 * 2
+            let locaPos = locaEntry.offset + Int64(glyphId) * 2
+            if (locaPos + 4 > fontData.size) { return Array<UInt8>(0, repeat: UInt8(0)) }
+            glyphOffset = Int64(readUInt16(locaPos)) * 2
+            glyphEnd    = Int64(readUInt16(locaPos + 2)) * 2
+        } else {
+            // long format: offset = UInt32
+            let locaPos = locaEntry.offset + Int64(glyphId) * 4
+            if (locaPos + 8 > fontData.size) { return Array<UInt8>(0, repeat: UInt8(0)) }
+            glyphOffset = Int64(readUInt32(locaPos))
+            glyphEnd    = Int64(readUInt32(locaPos + 4))
+        }
+
+        let glyphLen = glyphEnd - glyphOffset
+        if (glyphLen <= 0) { return Array<UInt8>(0, repeat: UInt8(0)) }
+
+        let src = glyfBase + glyphOffset
+        if (src + glyphLen > fontData.size) { return Array<UInt8>(0, repeat: UInt8(0)) }
+        let buf = Array<UInt8>(glyphLen, repeat: UInt8(0))
+        for (i in 0..glyphLen) { buf[i] = fontData[src + i] }
+        buf
     }
 
     /**

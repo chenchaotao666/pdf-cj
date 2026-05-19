@@ -8,13 +8,14 @@ import std.io.OutputStream
 import std.collection.ArrayList
 import pdf_cj.base.{
     PdfObject, PdfDictionary, PdfName, PdfNumber, PdfString, PdfArray,
-    PdfStream, PdfIndirectReference, PdfOutputStream, PdfFileOutputStream
+    PdfStream, PdfIndirectReference, PdfOutputStream, PdfFileOutputStream, PdfBoolean
 }
 import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phrase, Chunk, HeaderFooter}
 import pdf_cj.util.{Rectangle, PageSize, PdfException}
 import pdf_cj.text.{Font, BaseFont, Alignment, TrueTypeFont, Color, Border}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow, VerticalAlignment}
 import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser}
+import pdf_cj.form.{PdfAnnotation, PdfFormField, PdfOutlineTree, PdfOutline}
 import pdf_cj.codec.FlateEncoder
 import zlib4cj.{Zlib, ZlibType}
 
@@ -56,6 +57,33 @@ public class PdfWriter <: DocListener {
     // 字体缓存
     private var _fontReferences: ArrayList<FontRefEntry> = ArrayList<FontRefEntry>()
 
+    // 预留的 Pages 对象编号（在 open() 时分配，供 completePage() 使用）
+    private var _pagesObjNum: Int32 = 0
+
+    // 延迟写入的字体文件（在 close() 时写入，确保所有字形都已标记）
+    private var _pendingFontFiles: ArrayList<PendingFontFile> = ArrayList<PendingFontFile>()
+
+    // 延迟写入的 CIDToGIDMap 流（在字体文件写入后，glyphMapping 就绪后写入）
+    private var _pendingCIDToGIDMaps: ArrayList<PendingCIDToGIDMap> = ArrayList<PendingCIDToGIDMap>()
+
+    // 当前页面预留对象编号（在 newPage() 时分配，供 completePage() 和书签引用使用）
+    private var _currentPageObjNum: Int32 = 0
+
+    // 已写入页面的引用列表（按页码顺序，从 1 开始）
+    private var _pageRefs: ArrayList<PdfIndirectReference> = ArrayList<PdfIndirectReference>()
+
+    // 当前页面待写入注释
+    private var _currentPageAnnots: ArrayList<PdfAnnotation> = ArrayList<PdfAnnotation>()
+
+    // 当前页面待写入表单字段
+    private var _currentPageFormFields: ArrayList<PdfFormField> = ArrayList<PdfFormField>()
+
+    // 所有表单字段引用（按写入顺序，在 completePage 中收集，close() 时写入 AcroForm）
+    private var _allFieldRefs: ArrayList<PdfIndirectReference> = ArrayList<PdfIndirectReference>()
+
+    // 书签树
+    private var _outlineTree: ?PdfOutlineTree = None
+
     // PDF 版本
     public static let PDF_VERSION_1_4 = "1.4"
     public static let PDF_VERSION_1_5 = "1.5"
@@ -92,6 +120,9 @@ public class PdfWriter <: DocListener {
     public func open(): Unit {
         // 写入 PDF 头
         writeHeader()
+
+        // 预留 Pages 对象编号，确保 completePage() 能正确设置 /Parent 引用
+        _pagesObjNum = _body.reserveObjectNumber()
 
         // 初始化页面设置
         match (_document) {
@@ -134,14 +165,78 @@ public class PdfWriter <: DocListener {
         // 完成当前页面
         finishCurrentPage()
 
+        // 写入延迟的字体文件（此时所有字形已经标记完毕，generateSubsetFont 会填充 glyphMapping）
+        for (pending in _pendingFontFiles) {
+            let fontStream = createFontFileStream(pending.ttf, pending.baseFont)
+            _body.add(fontStream, pending.objNum)
+        }
+
+        // 写入 CIDToGIDMap 流（依赖上方 generateSubsetFont 已填充的 glyphMapping）
+        for (pending in _pendingCIDToGIDMaps) {
+            match (pending.baseFont.getFontSubset()) {
+                case Some(subset) =>
+                    let cidToGIDData = subset.buildCIDToGIDMapData()
+                    let stream = PdfStream()
+                    stream.setContent(cidToGIDData)
+                    _body.add(stream, pending.objNum)
+                case None => ()
+            }
+        }
+
+        // 写入 AcroForm（如果有表单字段）
+        if (_allFieldRefs.size > 0) {
+            let fieldsArray = PdfArray()
+            for (i in 0.._allFieldRefs.size) {
+                fieldsArray.add(_allFieldRefs[i])
+            }
+            let acroForm = PdfDictionary()
+            acroForm.put(PdfName("Fields"), fieldsArray)
+            acroForm.put(PdfName("NeedAppearances"), PdfBoolean(true))
+            _catalog.setAcroForm(acroForm)
+        }
+
+        // 写入书签树（如果有）
+        match (_outlineTree) {
+            case Some(tree) =>
+                // 递归收集所有节点（包括在 addOutline 之后添加的子节点）
+                let allOutlines = ArrayList<PdfOutline>()
+                collectAllOutlines(tree.getRoot(), allOutlines)
+                if (allOutlines.size > 1) {
+                    // 为每个节点预留对象编号
+                    for (i in 0..allOutlines.size) {
+                        let objNum = _body.reserveObjectNumber()
+                        allOutlines[i].setReference(PdfIndirectReference(objNum))
+                    }
+                    // 构建所有书签字典（填充 Parent/First/Last/Prev/Next）
+                    for (i in 0..allOutlines.size) {
+                        allOutlines[i].buildDictionary()
+                    }
+                    // 写入所有书签对象
+                    for (i in 0..allOutlines.size) {
+                        let outline = allOutlines[i]
+                        match (outline.getReference()) {
+                            case Some(ref) =>
+                                _body.add(outline.getDictionary(), ref.objectNumber)
+                            case None => ()
+                        }
+                    }
+                    match (allOutlines[0].getReference()) {
+                        case Some(rootRef) =>
+                            _catalog.setOutlines(rootRef)
+                            _catalog.dictionary.put(PdfName("PageMode"), PdfName("UseOutlines"))
+                        case None => ()
+                    }
+                }
+            case None => ()
+        }
+
         // 预留对象编号
         let catalogObjNum = _body.reserveObjectNumber()
-        let pagesObjNum = _body.reserveObjectNumber()
         let infoObjNum = _body.reserveObjectNumber()
 
         // 写入页面树
-        let pagesRef = PdfIndirectReference(pagesObjNum)
-        _body.add(_pages.dictionary, pagesObjNum)
+        let pagesRef = PdfIndirectReference(_pagesObjNum)
+        _body.add(_pages.dictionary, _pagesObjNum)
 
         // 写入 Catalog
         _catalog.setPages(pagesRef)
@@ -171,6 +266,9 @@ public class PdfWriter <: DocListener {
 
         _pageNumber += 1
 
+        // 预留页面对象编号（供书签 Destination 引用和 completePage 写入使用）
+        _currentPageObjNum = _body.reserveObjectNumber()
+
         // 创建新页面
         _currentPage = Some(PdfPage(_pageSize))
         _currentContent = PdfContentByte(this)
@@ -185,7 +283,40 @@ public class PdfWriter <: DocListener {
             case None => ()
         }
 
+        // 重置当前页面注释和表单字段列表
+        _currentPageAnnots = ArrayList<PdfAnnotation>()
+        _currentPageFormFields = ArrayList<PdfFormField>()
+
         true
+    }
+
+    /**
+     * 添加注释到当前页面
+     */
+    public func addAnnotation(annot: PdfAnnotation): Unit {
+        _currentPageAnnots.add(annot)
+    }
+
+    /**
+     * 添加表单字段到当前页面（同时写入 AcroForm 和页面 Annots）
+     */
+    public func addFormField(field: PdfFormField): Unit {
+        _currentPageFormFields.add(field)
+    }
+
+    /**
+     * 设置书签树（在 close() 时写入）
+     */
+    public func setOutlineTree(tree: PdfOutlineTree): Unit {
+        _outlineTree = Some(tree)
+    }
+
+    /**
+     * 获取当前页面引用（用于创建书签 Destination）
+     * 必须在 newPage()/open() 之后调用
+     */
+    public func getCurrentPageReference(): PdfIndirectReference {
+        PdfIndirectReference(_currentPageObjNum)
     }
 
     /**
@@ -319,13 +450,75 @@ public class PdfWriter <: DocListener {
         // 设置资源
         page.setResources(_resources.toDictionary())
 
-        // 获取页面树引用
-        let pagesObjNum = _body.objectCount + 2  // 预估
-        page.setParent(PdfIndirectReference(pagesObjNum))
+        // 设置父节点引用
+        page.setParent(PdfIndirectReference(_pagesObjNum))
 
-        // 写入页面
-        let pageRef = _body.add(page.dictionary)
+        // 写入注释和表单字段到页面 Annots 数组
+        let annotsArray = PdfArray()
+        var hasAnnots = false
+
+        // 普通注释
+        for (i in 0.._currentPageAnnots.size) {
+            let annotRef = _body.add(_currentPageAnnots[i].getDictionary())
+            annotsArray.add(annotRef)
+            hasAnnots = true
+        }
+
+        // 表单字段（合并的字段+Widget 对象）
+        for (i in 0.._currentPageFormFields.size) {
+            let field = _currentPageFormFields[i]
+            let mergedDict = buildMergedFieldDict(field, _currentPageObjNum)
+            let fieldRef = _body.add(mergedDict)
+            annotsArray.add(fieldRef)
+            _allFieldRefs.add(fieldRef)
+            hasAnnots = true
+        }
+
+        if (hasAnnots) {
+            page.dictionary.put(PdfName("Annots"), annotsArray)
+        }
+
+        // 写入页面（使用预留的对象编号）
+        let pageRef = _body.add(page.dictionary, _currentPageObjNum)
+        _pageRefs.add(pageRef)
         _pages.addPage(pageRef)
+    }
+
+    /**
+     * 递归收集书签树中的所有节点（深度优先）
+     */
+    private func collectAllOutlines(outline: PdfOutline, result: ArrayList<PdfOutline>): Unit {
+        result.add(outline)
+        let children = outline.getChildren()
+        for (i in 0..children.size) {
+            collectAllOutlines(children[i], result)
+        }
+    }
+
+    /**
+     * 将表单字段字典与其 Widget 注释属性合并为单个 PDF 对象
+     */
+    private func buildMergedFieldDict(field: PdfFormField, pageObjNum: Int32): PdfDictionary {
+        let dict = field.getDictionary()
+        // 设置 Annot 类型标记
+        dict.put(PdfName("Type"), PdfName("Annot"))
+        dict.put(PdfName("Subtype"), PdfName("Widget"))
+        // 设置页面引用
+        dict.put(PdfName("P"), PdfIndirectReference(pageObjNum))
+        // 从第一个 widget 复制 Rect（如果字段字典本身没有 Rect）
+        match (dict.get(PdfName("Rect"))) {
+            case None =>
+                let widgets = field.getWidgets()
+                if (widgets.size > 0) {
+                    let widgetDict = widgets[0].getDictionary()
+                    match (widgetDict.get(PdfName("Rect"))) {
+                        case Some(rect) => dict.put(PdfName("Rect"), rect)
+                        case None => ()
+                    }
+                }
+            case Some(_) => ()
+        }
+        dict
     }
 
     /**
@@ -1183,6 +1376,8 @@ public class PdfWriter <: DocListener {
 
         // 根据字体编码选择输出方式
         let useUnicode = baseFont.isUnicodeEncoding()
+        // 标记本段文字用到的字形（供字体子集化使用）
+        baseFont.markStringUsed(chunk.content)
         // 传递 BaseFont 以支持 Unicode 到 Glyph ID 的转换
         getContent().showText(chunk.content, useUnicode, Some(baseFont))
 
@@ -1254,19 +1449,34 @@ public class PdfWriter <: DocListener {
         cidSystemInfo.put(PdfName("Ordering"), PdfString("Identity"))
         cidSystemInfo.put(PdfName("Supplement"), PdfNumber(0))
 
+        // 判断是否为 CFF（OpenType）字体
+        let isCFF = match (baseFont.getTrueTypeFont()) {
+            case Some(ttf) => ttf.isCFF()
+            case None => false
+        }
+
         // 创建 CIDFont 字典（DescendantFonts）
+        // CFF 字体用 CIDFontType0，TrueType 字体用 CIDFontType2
         let cidFont = PdfDictionary()
         cidFont.put(PdfName.TYPE, PdfName.FONT)
-        cidFont.put(PdfName("Subtype"), PdfName("CIDFontType2"))
+        cidFont.put(PdfName("Subtype"), PdfName(if (isCFF) { "CIDFontType0" } else { "CIDFontType2" }))
         cidFont.put(PdfName.BASEFONT, PdfName(baseFont.name))
         cidFont.put(PdfName("CIDSystemInfo"), cidSystemInfo)
 
         // 添加默认宽度
         cidFont.put(PdfName("DW"), PdfNumber(1000))
 
-        // 设置 CIDToGIDMap 为 Identity
-        // 这表示 CID（我们输出的 Glyph ID）直接对应字体中的 Glyph ID
-        cidFont.put(PdfName("CIDToGIDMap"), PdfName("Identity"))
+        // CIDToGIDMap：仅 TrueType（CIDFontType2）需要
+        // 嵌入字体使用流式 CIDToGIDMap（旧 GID → 紧凑新 GID），未嵌入字体用 Identity
+        if (!isCFF) {
+            if (baseFont.isEmbedded && baseFont.getFontSubset().isSome()) {
+                let cidToGIDObjNum = _body.reserveObjectNumber()
+                cidFont.put(PdfName("CIDToGIDMap"), PdfIndirectReference(cidToGIDObjNum))
+                _pendingCIDToGIDMaps.add(PendingCIDToGIDMap(cidToGIDObjNum, baseFont))
+            } else {
+                cidFont.put(PdfName("CIDToGIDMap"), PdfName("Identity"))
+            }
+        }
 
         // 只有在嵌入字体时才创建 FontDescriptor
         if (baseFont.isEmbedded && baseFont.path.isSome()) {
@@ -1322,11 +1532,17 @@ public class PdfWriter <: DocListener {
                 descriptor.put(PdfName("CapHeight"), PdfNumber(ascent))
                 descriptor.put(PdfName("StemV"), PdfNumber(80))
 
-                // 嵌入字体文件
+                // 嵌入字体文件：预留对象编号，延迟到 close() 写入
+                // CFF 字体用 FontFile3，TrueType 字体用 FontFile2
                 if (baseFont.isEmbedded) {
-                    let fontStream = createFontFileStream(ttf)
-                    let fontFileRef = _body.add(fontStream)
-                    descriptor.put(PdfName("FontFile2"), fontFileRef)  // TrueType
+                    let fontFileObjNum = _body.reserveObjectNumber()
+                    let fontFileRef = PdfIndirectReference(fontFileObjNum)
+                    if (ttf.isCFF()) {
+                        descriptor.put(PdfName("FontFile3"), fontFileRef)
+                    } else {
+                        descriptor.put(PdfName("FontFile2"), fontFileRef)
+                    }
+                    _pendingFontFiles.add(PendingFontFile(fontFileObjNum, ttf, baseFont))
                 }
             case None =>
                 // 使用默认值
@@ -1344,15 +1560,37 @@ public class PdfWriter <: DocListener {
 
     /**
      * 创建字体文件流
+     * CFF 字体：提取原始 CFF 表数据，用 FontFile3/CIDFontType0C 嵌入（不子集化）
+     * TrueType 字体：生成子集 TTF，用 FontFile2 嵌入
      */
-    private func createFontFileStream(ttf: TrueTypeFont): PdfStream {
-        let fontData = ttf.getFontData()
-
+    private func createFontFileStream(ttf: TrueTypeFont, baseFont: BaseFont): PdfStream {
         let stream = PdfStream()
-        stream.setContent(fontData)
 
-        // 添加字体文件长度
-        stream.put(PdfName("Length1"), PdfNumber(Int32(fontData.size)))
+        if (ttf.isCFF()) {
+            // OpenType/CFF 字体：子集化后嵌入 CFF 表数据
+            let rawCFF: Array<UInt8> = match (ttf.getRawTable("CFF ")) {
+                case Some(d) => d
+                case None => Array<UInt8>(0, repeat: UInt8(0))
+            }
+            let cffData: Array<UInt8> = match (baseFont.getFontSubset()) {
+                case Some(subset) =>
+                    let sub = subset.generateCFFSubset(rawCFF)
+                    if (sub.size > 0 && sub.size < rawCFF.size) { sub } else { rawCFF }
+                case None => rawCFF
+            }
+            stream.put(PdfName("Subtype"), PdfName("CIDFontType0C"))
+            stream.setContent(cffData)
+        } else {
+            // TrueType 字体：使用子集数据
+            let fontData: Array<UInt8> = match (baseFont.getFontSubset()) {
+                case Some(subset) =>
+                    let subsetData = subset.generateSubsetFont()
+                    if (subsetData.size > 0) { subsetData } else { ttf.getFontData() }
+                case None => ttf.getFontData()
+            }
+            stream.put(PdfName("Length1"), PdfNumber(Int32(fontData.size)))
+            stream.setContent(fontData)
+        }
 
         stream
     }
@@ -1460,6 +1698,21 @@ public class PdfWriter <: DocListener {
     public prop resources: PdfResources {
         get() { _resources }
     }
+
+    /**
+     * 获取当前文档流 Y 坐标（PDF 坐标系，从页面底部算起，向上为正）
+     * 可在 document.add() 前后读取，用于精确定位表单字段
+     */
+    public prop currentY: Float32 {
+        get() { _currentY }
+    }
+
+    /**
+     * 获取左边距
+     */
+    public prop marginLeft: Float32 {
+        get() { _marginLeft }
+    }
 }
 
 /**
@@ -1472,5 +1725,34 @@ class FontRefEntry {
     public init(fontName: String, reference: PdfIndirectReference) {
         this.fontName = fontName
         this.reference = reference
+    }
+}
+
+/**
+ * 延迟写入的字体文件条目
+ */
+class PendingFontFile {
+    public let objNum: Int32
+    public let ttf: TrueTypeFont
+    public let baseFont: BaseFont
+
+    public init(objNum: Int32, ttf: TrueTypeFont, baseFont: BaseFont) {
+        this.objNum = objNum
+        this.ttf = ttf
+        this.baseFont = baseFont
+    }
+}
+
+/**
+ * 延迟写入的 CIDToGIDMap 流条目
+ * 在字体文件写入（generateSubsetFont 填充 glyphMapping）之后写入
+ */
+class PendingCIDToGIDMap {
+    public let objNum: Int32
+    public let baseFont: BaseFont
+
+    public init(objNum: Int32, baseFont: BaseFont) {
+        this.objNum = objNum
+        this.baseFont = baseFont
     }
 }

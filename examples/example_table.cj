@@ -9,7 +9,7 @@ import pdf_cj.*
 main() {
     println("创建表格示例 PDF...")
 
-    let output = File(Path("example_table.pdf"), OpenMode.Write)
+    let output = File(Path("output/example_table.pdf"), OpenMode.Write)
     let document = Document()
     let writer = PdfWriter.getInstance(document, output)
 
@@ -224,6 +224,6 @@ main() {
     document.close()
     output.close()
 
-    println("✓ 成功创建：example_table.pdf")
+    println("✓ 成功创建：output/example_table.pdf")
     println("  演示了 4 种表格样式")
 }

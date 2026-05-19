@@ -31,26 +31,34 @@ echo "编译示例: $EXAMPLE_NAME"
 export LD_LIBRARY_PATH="../target/release/zlib4cj:$LD_LIBRARY_PATH"
 
 # 链接所有必要的库文件（包括 zlib4cj）
+# pdf_cj 各子包之间存在反射元数据 (.ti) 的循环引用 (例如 text.a 依赖 base.a)。
+# 由于 ld 默认单遍扫描静态库，先列的 .a 在被后续 .a 引用时会找不到符号。
+# 这里通过 --link-options 在 ld 命令尾部追加一遍带 --start-group 的所有库，
+# 让 ld 反复迭代解析直到所有符号解决。
+PDF_LIBS_DIR="../target/release/pdf_cj"
 cjc --import-path ../target/release/pdf_cj \
     --import-path ../target/release/zlib4cj \
     "$EXAMPLE_FILE" \
-    ../target/release/pdf_cj/libpdf_cj.a \
-    ../target/release/pdf_cj/libpdf_cj.api.a \
-    ../target/release/pdf_cj/libpdf_cj.base.a \
-    ../target/release/pdf_cj/libpdf_cj.codec.a \
-    ../target/release/pdf_cj/libpdf_cj.core.a \
-    ../target/release/pdf_cj/libpdf_cj.image.a \
-    ../target/release/pdf_cj/libpdf_cj.table.a \
-    ../target/release/pdf_cj/libpdf_cj.text.a \
-    ../target/release/pdf_cj/libpdf_cj.util.a \
-    ../target/release/pdf_cj/libpdf_cj.form.a \
-    ../target/release/pdf_cj/libpdf_cj.security.a \
-    ../target/release/pdf_cj/libpdf_cj.reader.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.api.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.base.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.codec.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.core.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.image.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.table.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.text.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.util.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.form.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.security.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.reader.a \
     -l:libzlib4cj.so \
     -L../target/release/zlib4cj \
+    --link-options="--start-group ${PDF_LIBS_DIR}/libpdf_cj.base.a ${PDF_LIBS_DIR}/libpdf_cj.util.a ${PDF_LIBS_DIR}/libpdf_cj.codec.a ${PDF_LIBS_DIR}/libpdf_cj.text.a ${PDF_LIBS_DIR}/libpdf_cj.image.a ${PDF_LIBS_DIR}/libpdf_cj.table.a ${PDF_LIBS_DIR}/libpdf_cj.api.a ${PDF_LIBS_DIR}/libpdf_cj.core.a ${PDF_LIBS_DIR}/libpdf_cj.reader.a ${PDF_LIBS_DIR}/libpdf_cj.form.a ${PDF_LIBS_DIR}/libpdf_cj.security.a ${PDF_LIBS_DIR}/libpdf_cj.a --end-group" \
     -o "$EXAMPLE_NAME"
 
 if [ $? -eq 0 ]; then
+    # 确保示例输出目录存在（示例会向 output/ 写 PDF 文件）
+    mkdir -p output
     echo "运行示例: $EXAMPLE_NAME"
     echo "----------------------------------------"
     ./"$EXAMPLE_NAME"

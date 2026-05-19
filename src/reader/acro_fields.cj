@@ -2,10 +2,10 @@
  * PDF-CJ: AcroFields - PDF 表单字段管理
  * 从 PDF 读取表单，提供字段的读取和填写功能
  */
-package pdf_cj.form
+package pdf_cj.reader
 
 import pdf_cj.base.*
-import pdf_cj.reader.PdfReader
+import pdf_cj.form.{FieldType, PdfAnnotation}
 import pdf_cj.util.PdfException
 import std.collection.{HashMap, ArrayList}
 

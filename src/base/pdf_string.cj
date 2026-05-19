@@ -34,11 +34,18 @@ public class PdfString <: PdfObjectBase {
     private var _bytes: ?Array<Byte> = None
 
     /**
-     * 从字符串创建
+     * 从字符串创建（自动检测编码：含非 ASCII 字符时使用 UTF-16BE Unicode 编码）
      */
     public init(value: String) {
         this._value = value
-        this._encoding = PdfStringEncoding.Text
+        var needsUnicode = false
+        for (c in value.runes()) {
+            if (UInt32(c) > 0x7Eu32) {
+                needsUnicode = true
+                break
+            }
+        }
+        this._encoding = if (needsUnicode) { PdfStringEncoding.Unicode } else { PdfStringEncoding.Text }
     }
 
     /**
@@ -142,8 +149,8 @@ public class PdfString <: PdfObjectBase {
         os.write(UInt8(0x3C))  // <
         // BOM
         os.writeString("FEFF")
-        // UTF-16BE 编码
-        for (c in _value) {
+        // UTF-16BE 编码（必须用 .runes() 以获取 Unicode 码位，而非 UTF-8 字节）
+        for (c in _value.runes()) {
             let codePoint = UInt32(c)
             if (codePoint < 0x10000) {
                 writeHexByte(os, UInt8((codePoint >> 8) & 0xFF))

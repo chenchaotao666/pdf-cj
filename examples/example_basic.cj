@@ -6,10 +6,18 @@ package pdf_cj_examples
 
 import pdf_cj.api.*
 import pdf_cj.core.PdfWriter
-import pdf_cj.text.{Font, FontFamily}
+import pdf_cj.text.{BaseFont, Font}
 import pdf_cj.util.PageSize
-import std.io.{File, FileMode}
-import std.fs.Path
+import std.fs.{File, OpenMode, Path}
+
+let NOTO_CJK_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+
+// BaseFont 加载一次后复用，避免每次调用都把整个 TTC 文件（~20MB）读入内存
+let CJK_BASE_FONT: BaseFont = BaseFont.createFont(NOTO_CJK_PATH, BaseFont.IDENTITY_H, BaseFont.EMBEDDED)
+
+func cjkFont(size: Float32): Font {
+    Font(CJK_BASE_FONT, size)
+}
 
 /**
  * 示例1：创建基本 PDF
@@ -23,19 +31,26 @@ public func example1_createBasicPdf(): Unit {
 
         // 创建输出文件
         let outputPath = Path("output/example1_basic.pdf")
-        let file = File(outputPath, FileMode.Write)
+        let file = File(outputPath, OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
 
         // 打开文档
         document.open()
 
-        // 添加段落
-        let paragraph = Paragraph("Hello, PDF-CJ!")
-        document.add(paragraph)
+        let cnFont = cjkFont(12.0)
 
-        // 添加更多内容
-        document.add(Paragraph("这是一个用仓颉语言生成的 PDF 文档。"))
-        document.add(Paragraph("PDF-CJ 支持中文显示。"))
+        // 添加段落
+        try {
+            println("添加第一个段落...")
+            document.add(Paragraph("Hello, PDF-CJ!"))
+            println("添加第二个段落...")
+            document.add(Paragraph("这是一个用仓颉语言生成的 PDF 文档。", cnFont))
+            println("添加第三个段落...")
+            document.add(Paragraph("PDF-CJ 支持中文显示。", cnFont))
+        } catch (e: Exception) {
+            println("添加段落时出错: ${e}")
+            throw e
+        }
 
         // 关闭文档
         document.close()
@@ -43,7 +58,8 @@ public func example1_createBasicPdf(): Unit {
 
         println("✓ 成功创建: output/example1_basic.pdf")
     } catch (e: Exception) {
-        println("✗ 错误: ${e.message}")
+        println("✗ 错误: ${e}")
+        println("✗ 消息: ${e.message}")
     }
 }
 
@@ -55,15 +71,15 @@ public func example2_fonts(): Unit {
         println("\n示例2：字体示例...")
 
         let document = Document(PageSize.A4)
-        let file = File(Path("output/example2_fonts.pdf"), FileMode.Write)
+        let file = File(Path("output/example2_fonts.pdf"), OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
 
         document.open()
 
         // 使用不同字体大小
-        document.add(Paragraph("标题文字", Font(FontFamily.HELVETICA, 24.0)))
-        document.add(Paragraph("正文文字", Font(FontFamily.HELVETICA, 12.0)))
-        document.add(Paragraph("小字文本", Font(FontFamily.HELVETICA, 8.0)))
+        document.add(Paragraph("标题文字", cjkFont(24.0)))
+        document.add(Paragraph("正文文字", cjkFont(12.0)))
+        document.add(Paragraph("小字文本", cjkFont(8.0)))
 
         document.close()
         file.close()
@@ -82,21 +98,23 @@ public func example3_multiPages(): Unit {
         println("\n示例3：多页面文档...")
 
         let document = Document(PageSize.A4)
-        let file = File(Path("output/example3_pages.pdf"), FileMode.Write)
+        let file = File(Path("output/example3_pages.pdf"), OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
 
         document.open()
 
+        let cnFont = cjkFont(12.0)
+
         // 第一页
-        document.add(Paragraph("第一页内容"))
+        document.add(Paragraph("第一页内容", cnFont))
         document.newPage()
 
         // 第二页
-        document.add(Paragraph("第二页内容"))
+        document.add(Paragraph("第二页内容", cnFont))
         document.newPage()
 
         // 第三页
-        document.add(Paragraph("第三页内容"))
+        document.add(Paragraph("第三页内容", cnFont))
 
         document.close()
         file.close()
