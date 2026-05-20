@@ -130,11 +130,52 @@ public class XRefParser {
 
     /**
      * 解析交叉引用表
+     * 自动检测传统 xref 表和 PDF 1.5+ XRef 流对象
      * @return 交叉引用表
      */
     public func parse(): XRefTable {
         let xrefTable = XRefTable()
+        skipWhitespace()
 
+        // 检测：传统 "xref" 关键字（首字节为 'x' = 0x78），或 XRef 流对象（首字节为数字）
+        if (position < data.size && data[position] == 0x78) {  // 'x' — start of "xref"
+            parseTraditionalXRef(xrefTable)
+        } else {
+            parseXRefStream(xrefTable)
+            return xrefTable  // 流解析自行处理 Prev 链
+        }
+
+        // 跟随 /Prev 更新链
+        match (xrefTable.getTrailer()) {
+            case Some(trailer) =>
+                match (trailer.get("Prev")) {
+                    case Some(prevOffsetStr) =>
+                        let prevOffset = parseIntFromStr(prevOffsetStr)
+                        if (prevOffset > 0) {
+                            let prevParser = XRefParser(data, prevOffset)
+                            let prevTable = prevParser.parse()
+                            // 合并：仅添加当前表中不存在的条目（当前表优先）
+                            for (objNum in prevTable.getAllObjectNumbers()) {
+                                if (!xrefTable.hasObject(objNum)) {
+                                    match (prevTable.getEntry(objNum)) {
+                                        case Some(entry) => xrefTable.addEntry(objNum, entry)
+                                        case None => ()
+                                    }
+                                }
+                            }
+                        }
+                    case None => ()
+                }
+            case None => ()
+        }
+
+        xrefTable
+    }
+
+    /**
+     * 解析传统 xref 表（从 "xref" 关键字开始）
+     */
+    private func parseTraditionalXRef(xrefTable: XRefTable): Unit {
         // 跳过 "xref" 关键字
         skipKeyword("xref")
 
@@ -161,12 +202,96 @@ public class XRefParser {
             }
         }
 
-        // 解析 trailer
+        // 解析 trailer 字典
         skipKeyword("trailer")
         let trailer = parseTrailer()
         xrefTable.setTrailer(trailer)
+    }
 
-        xrefTable
+    /**
+     * 解析 PDF 1.5+ XRef 流对象
+     * 格式：objNum gen obj\n<< /Type /XRef ... >>\nstream\n...\nendstream
+     */
+    private func parseXRefStream(xrefTable: XRefTable): Unit {
+        // 跳过 "objNum gen obj" 头部
+        skipNumber(); skipWhitespace()
+        skipNumber(); skipWhitespace()
+        skipKeyword("obj")
+        skipWhitespace()
+
+        // 解析流字典以获取 W、Index、Size、Filter、Length、Prev
+        var wWidths: Array<Int32> = [1, 2, 1]
+        var indexPairs: Array<Int32> = [0, 0]
+        var streamLength: Int32 = 0
+        var prevOffset: Int64 = -1
+        var isFlate = false
+
+        // 期望 "<<"
+        if (position + 1 >= data.size || data[position] != 0x3C || data[position + 1] != 0x3C) {
+            return
+        }
+        position += 2
+
+        while (position < data.size) {
+            skipWhitespace()
+            if (position + 1 < data.size && data[position] == 0x3E && data[position + 1] == 0x3E) {
+                position += 2
+                break
+            }
+            if (data[position] != 0x2F) {
+                position += 1
+                continue
+            }
+            position += 1  // skip '/'
+            let key = readToken()
+            skipWhitespace()
+
+            if (key == "W") {
+                wWidths = parseIntArrayInline()
+            } else if (key == "Index") {
+                indexPairs = parseIntArrayInline()
+            } else if (key == "Size") {
+                streamLength = Int32(parseIntFromStr(readToken()))
+            } else if (key == "Length") {
+                streamLength = Int32(parseIntFromStr(readToken()))
+            } else if (key == "Filter") {
+                let v = readTrailerValue()
+                isFlate = v.contains("FlateDecode")
+            } else if (key == "Prev") {
+                prevOffset = parseIntFromStr(readToken())
+            } else {
+                // 跳过不关心的值
+                readTrailerValue()
+            }
+        }
+
+        // 跳过 "stream\n"
+        skipKeyword("stream")
+        if (position < data.size && data[position] == 0x0D) { position += 1 }
+        if (position < data.size && data[position] == 0x0A) { position += 1 }
+
+        // 读取原始流字节（streamLength 字节）
+        let rawStart = position
+        let rawEnd = if (rawStart + Int64(streamLength) < data.size) {
+            rawStart + Int64(streamLength)
+        } else {
+            data.size
+        }
+        let rawBytes = Array<UInt8>(rawEnd - rawStart, repeat: 0)
+        for (i in 0..(rawEnd - rawStart)) {
+            rawBytes[i] = data[rawStart + i]
+        }
+        position = rawEnd
+
+        // 解压缩（FlateDecode）需要 Zlib 支持 — 暂存 Prev 信息
+        // TODO: 集成 Zlib 解压后完整解析二进制条目
+
+        // 保存 Prev 用于链式跟随
+        if (prevOffset > 0) {
+            let prevTrailer = HashMap<String, String>()
+            prevTrailer["Prev"] = "${prevOffset}"
+            xrefTable.setTrailer(prevTrailer)
+        }
     }
 
     /**
@@ -216,7 +341,7 @@ public class XRefParser {
     }
 
     /**
-     * 读取数字
+     * 读取数字（Int32）
      */
     private func readNumber(): Int32 {
         var result: Int32 = 0
@@ -248,19 +373,34 @@ public class XRefParser {
     }
 
     /**
-     * 跳过关键字
+     * 跳过关键字（使用 matchBytesAt 精确检测后跳过）
      */
     private func skipKeyword(keyword: String): Unit {
-        for (ch in keyword) {
-            if (position < data.size) {
-                position += 1
-            }
+        skipWhitespace()
+        let kw = stringToBytes(keyword)
+        if (matchBytesAt(data, position, kw)) {
+            position += Int64(kw.size)
         }
         skipWhitespace()
     }
 
     /**
-     * 检查是否匹配关键字
+     * 跳过纯数字序列
+     */
+    private func skipNumber(): Unit {
+        skipWhitespace()
+        while (position < data.size) {
+            let ch = data[position]
+            if (ch >= 0x30 && ch <= 0x39) {
+                position += 1
+            } else {
+                break
+            }
+        }
+    }
+
+    /**
+     * 检查是否匹配关键字（不改变位置，匹配时前进）
      */
     private func matchKeyword(keyword: String): Bool {
         let savedPos = position
@@ -309,15 +449,164 @@ public class XRefParser {
     }
 
     /**
-     * 解析 trailer 字典（简化版本）
+     * 解析 trailer 字典 << /Key Value ... >>
      */
     private func parseTrailer(): HashMap<String, String> {
         let trailer = HashMap<String, String>()
+        skipWhitespace()
 
-        // 简化实现：跳过 trailer 内容
-        // 实际应该使用 PdfParser 解析 trailer 字典
+        // 跳过 "<<"
+        if (position + 1 < data.size && data[position] == 0x3C && data[position + 1] == 0x3C) {
+            position += 2
+        } else {
+            return trailer
+        }
+
+        // 逐个解析键值对，直到 ">>"
+        while (position < data.size) {
+            skipWhitespace()
+            // 检测 ">>"
+            if (position + 1 < data.size && data[position] == 0x3E && data[position + 1] == 0x3E) {
+                position += 2
+                break
+            }
+            // 期望 "/" 开头的键名
+            if (position >= data.size || data[position] != 0x2F) {
+                break
+            }
+            position += 1  // 跳过 '/'
+            let key = readToken()
+            skipWhitespace()
+
+            // 读取值（数字、名称、数组、间接引用 "n g R" 等）
+            let value = readTrailerValue()
+            trailer[key] = value
+        }
 
         trailer
+    }
+
+    /**
+     * 读取原始 token 字符串（遇到空白或分隔符停止）
+     */
+    private func readToken(): String {
+        var result = ""
+        while (position < data.size) {
+            let ch = data[position]
+            if (isWhitespace(ch) || ch == 0x2F || ch == 0x3E || ch == 0x5B || ch == 0x5D) {
+                break
+            }
+            result += String(Rune(Int64(ch)))
+            position += 1
+        }
+        result
+    }
+
+    /**
+     * 读取 trailer 中的值（字符串表示）
+     * 支持：数字、名称（/Name）、数组（[...]）、嵌套字典（<<...>>）、间接引用（n g R）
+     */
+    private func readTrailerValue(): String {
+        skipWhitespace()
+        if (position >= data.size) { return "" }
+
+        let ch = data[position]
+
+        // 名称值 /Name
+        if (ch == 0x2F) {
+            position += 1
+            return "/" + readToken()
+        }
+
+        // 数组：读取到 ']' 并原样返回
+        if (ch == 0x5B) {
+            var result = "["
+            position += 1
+            var depth = 1
+            while (position < data.size && depth > 0) {
+                let c = data[position]
+                result += String(Rune(Int64(c)))
+                if (c == 0x5B) { depth += 1 }
+                if (c == 0x5D) { depth -= 1 }
+                position += 1
+            }
+            return result
+        }
+
+        // 嵌套字典：跳过（trailer 中通常不需要展开）
+        if (ch == 0x3C && position + 1 < data.size && data[position + 1] == 0x3C) {
+            position += 2
+            var depth = 1
+            while (position < data.size && depth > 0) {
+                if (position + 1 < data.size && data[position] == 0x3C && data[position + 1] == 0x3C) {
+                    depth += 1
+                    position += 2
+                } else if (position + 1 < data.size && data[position] == 0x3E && data[position + 1] == 0x3E) {
+                    depth -= 1
+                    position += 2
+                } else {
+                    position += 1
+                }
+            }
+            return "<<dict>>"
+        }
+
+        // 数字或间接引用 "n g R" — 读取第一个 token，向前窥视
+        let num1 = readToken()
+        skipWhitespace()
+        // 保存位置，尝试读取第二个 token
+        let savedPos = position
+        let num2 = readToken()
+        skipWhitespace()
+        if (position < data.size && data[position] == 0x52) {  // 'R'
+            position += 1
+            return num1 + " " + num2 + " R"
+        }
+        // 非间接引用，回退
+        position = savedPos
+        return num1
+    }
+
+    /**
+     * 解析内联整数数组 [n1 n2 ...]，返回 Array<Int32>
+     */
+    private func parseIntArrayInline(): Array<Int32> {
+        let result = ArrayList<Int32>()
+        skipWhitespace()
+        // 跳过 '['
+        if (position < data.size && data[position] == 0x5B) { position += 1 }
+        while (position < data.size) {
+            skipWhitespace()
+            if (data[position] == 0x5D) {
+                position += 1
+                break
+            }
+            let num = readToken()
+            if (!num.isEmpty()) {
+                result.add(Int32(parseIntFromStr(num)))
+            }
+        }
+        let arr = Array<Int32>(result.size, repeat: 0)
+        for (i in 0..result.size) {
+            arr[i] = result[i]
+        }
+        arr
+    }
+
+    /**
+     * 从字符串解析 Int64（只读前缀数字部分）
+     */
+    private func parseIntFromStr(s: String): Int64 {
+        var result: Int64 = 0
+        for (r in s.runes()) {
+            let code = UInt32(r)
+            if (code >= 0x30 && code <= 0x39) {
+                result = result * 10 + Int64(code - 0x30)
+            } else {
+                break
+            }
+        }
+        result
     }
 
     /**

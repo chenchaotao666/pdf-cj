@@ -19,6 +19,9 @@ public enum TokenType {
     | StartDict     // <<
     | EndDict       // >>
     | Ref           // 间接引用标记 R
+    | Boolean       // true / false
+    | Null          // null
+    | Stream        // raw stream content bytes (value = placeholder, actual bytes via readStreamContent)
     | EndOfFile     // 文件结束
     | Unknown       // 未知
 }
@@ -104,6 +107,13 @@ public class PdfTokenizer {
         if (pos >= 0 && pos < length) {
             this.position = pos
         }
+    }
+
+    /**
+     * 获取数据长度
+     */
+    public func getLength(): Int64 {
+        length
     }
 
     /**
@@ -324,7 +334,7 @@ public class PdfTokenizer {
     }
 
     /**
-     * 读取关键字
+     * 读取关键字，并识别 R / true / false / null
      */
     private func readKeyword(): Token {
         var result = ArrayList<UInt8>()
@@ -339,6 +349,15 @@ public class PdfTokenizer {
         }
 
         let str = bytesToString(result)
+
+        if (str == "R") {
+            return Token(TokenType.Ref, "R")
+        } else if (str == "true" || str == "false") {
+            return Token(TokenType.Boolean, str)
+        } else if (str == "null") {
+            return Token(TokenType.Null, "null")
+        }
+
         Token(TokenType.Keyword, str)
     }
 
@@ -376,7 +395,7 @@ public class PdfTokenizer {
     }
 
     /**
-     * 判断字符串是否为数字
+     * 判断字符串是否为数字（正确处理符号只允许在首位）
      */
     private func isNumeric(str: String): Bool {
         if (str.size == 0) {
@@ -385,9 +404,10 @@ public class PdfTokenizer {
 
         var hasDigit = false
         var hasDot = false
+        var isFirst = true
 
-        for (ch in str) {
-            let code = Int64(ch)
+        for (r in str.runes()) {
+            let code = UInt32(r)
             if (code >= 0x30 && code <= 0x39) {  // 0-9
                 hasDigit = true
             } else if (code == 0x2E) {  // '.'
@@ -396,11 +416,14 @@ public class PdfTokenizer {
                 }
                 hasDot = true
             } else if (code == 0x2B || code == 0x2D) {  // '+' or '-'
-                // 只能在开头
-                continue
+                if (!isFirst) {
+                    return false
+                }
+                // sign is allowed only at position 0; do not set hasDigit
             } else {
                 return false
             }
+            isFirst = false
         }
 
         hasDigit
@@ -416,6 +439,46 @@ public class PdfTokenizer {
             result = "${result}${Rune(Int64(ch))}"
         }
         result
+    }
+
+    /**
+     * 在指定位置匹配字节模式
+     */
+    private func matchBytesAt(data: Array<UInt8>, pos: Int64, pattern: Array<UInt8>): Bool {
+        if (pos + pattern.size > data.size) { return false }
+        for (i in 0..pattern.size) {
+            if (data[pos + i] != pattern[i]) { return false }
+        }
+        true
+    }
+
+    /**
+     * 读取 stream 的原始内容字节
+     * 调用前 position 应紧接在 "stream" 关键字之后
+     * 跳过一个换行符（CR、LF 或 CRLF），读取直到 endstream，返回内容字节
+     */
+    public func readStreamContent(): Array<UInt8> {
+        // skip one EOL after "stream" keyword (CR, LF, or CRLF)
+        if (position < length && data[position] == 0x0D) { position += 1 }  // CR
+        if (position < length && data[position] == 0x0A) { position += 1 }  // LF
+        let start = position
+        // endstream pattern bytes
+        let pattern: Array<UInt8> = [0x65, 0x6E, 0x64, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6D]  // "endstream"
+        while (position < length) {
+            if (data[position] == 0x65) {  // 'e'
+                if (matchBytesAt(data, position, pattern)) {
+                    // trim trailing whitespace (CR/LF) before endstream
+                    var end = position
+                    while (end > start && (data[end - 1] == 0x0A || data[end - 1] == 0x0D)) { end -= 1 }
+                    let content = Array<UInt8>(end - start, repeat: 0)
+                    for (i in 0..(end - start)) { content[i] = data[start + i] }
+                    position += pattern.size
+                    return content
+                }
+            }
+            position += 1
+        }
+        return Array<UInt8>(0, repeat: 0)
     }
 
     /**
