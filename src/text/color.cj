@@ -116,6 +116,49 @@ public struct Color {
 }
 
 /**
+ * CMYK 颜色，各分量范围 0.0–1.0
+ */
+public struct CMYKColor {
+    public let cyan: Float32
+    public let magenta: Float32
+    public let yellow: Float32
+    public let black: Float32
+
+    public static let BLACK   = CMYKColor(0.0, 0.0, 0.0, 1.0)
+    public static let WHITE   = CMYKColor(0.0, 0.0, 0.0, 0.0)
+    public static let RED     = CMYKColor(0.0, 1.0, 1.0, 0.0)
+    public static let GREEN   = CMYKColor(1.0, 0.0, 1.0, 0.0)
+    public static let BLUE    = CMYKColor(1.0, 1.0, 0.0, 0.0)
+    public static let CYAN    = CMYKColor(1.0, 0.0, 0.0, 0.0)
+    public static let MAGENTA = CMYKColor(0.0, 1.0, 0.0, 0.0)
+    public static let YELLOW  = CMYKColor(0.0, 0.0, 1.0, 0.0)
+
+    public init(c: Float32, m: Float32, y: Float32, k: Float32) {
+        this.cyan = c
+        this.magenta = m
+        this.yellow = y
+        this.black = k
+    }
+}
+
+/**
+ * 灰度颜色，gray 范围 0.0（黑）–1.0（白）
+ */
+public struct GrayColor {
+    public let gray: Float32
+
+    public static let BLACK      = GrayColor(0.0)
+    public static let DARK_GRAY  = GrayColor(0.25)
+    public static let GRAY       = GrayColor(0.5)
+    public static let LIGHT_GRAY = GrayColor(0.75)
+    public static let WHITE      = GrayColor(1.0)
+
+    public init(gray: Float32) {
+        this.gray = gray
+    }
+}
+
+/**
  * 取最小值辅助函数
  */
 func min(a: Float32, b: Float32): Float32 {

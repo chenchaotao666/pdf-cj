@@ -6,7 +6,7 @@ package pdf_cj.core
 
 import std.collection.ArrayList
 import pdf_cj.base.{PdfStream, PdfName, ByteWrapper}
-import pdf_cj.text.{Color, BaseFont}
+import pdf_cj.text.{Color, CMYKColor, GrayColor, BaseFont}
 import std.math.{sin, cos, tan}
 
 /**
@@ -363,6 +363,20 @@ public class PdfContentByte {
         appendNewLine()
     }
 
+    /** 设置填充颜色（GrayColor 类型，输出 PDF g 算子） */
+    public func setColorFill(color: GrayColor): Unit {
+        appendFloat(color.gray)
+        appendString(" g")
+        appendNewLine()
+    }
+
+    /** 设置描边颜色（GrayColor 类型，输出 PDF G 算子） */
+    public func setColorStroke(color: GrayColor): Unit {
+        appendFloat(color.gray)
+        appendString(" G")
+        appendNewLine()
+    }
+
     /**
      * 设置填充颜色（CMYK，各分量 0.0-1.0）
      */
@@ -389,6 +403,32 @@ public class PdfContentByte {
         appendFloat(y)
         appendSpace()
         appendFloat(k)
+        appendString(" K")
+        appendNewLine()
+    }
+
+    /** 设置填充颜色（CMYKColor 类型，输出 PDF k 算子） */
+    public func setColorFill(color: CMYKColor): Unit {
+        appendFloat(color.cyan)
+        appendSpace()
+        appendFloat(color.magenta)
+        appendSpace()
+        appendFloat(color.yellow)
+        appendSpace()
+        appendFloat(color.black)
+        appendString(" k")
+        appendNewLine()
+    }
+
+    /** 设置描边颜色（CMYKColor 类型，输出 PDF K 算子） */
+    public func setColorStroke(color: CMYKColor): Unit {
+        appendFloat(color.cyan)
+        appendSpace()
+        appendFloat(color.magenta)
+        appendSpace()
+        appendFloat(color.yellow)
+        appendSpace()
+        appendFloat(color.black)
         appendString(" K")
         appendNewLine()
     }
