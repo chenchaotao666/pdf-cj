@@ -615,9 +615,9 @@ public class TrueTypeFont {
                 // - numberOfHMetrics 个 longHorMetric 记录（每个 4 字节：advanceWidth + lsb）
                 // - 剩余字形只有 lsb（每个 2 字节），宽度沿用最后一个 advanceWidth
 
-                // 初始化字形宽度数组（使用最大可能数量）
-                let maxGlyphs = numberOfHMetrics + 1000  // 预留空间
-                glyphWidths = Array<Int32>(Int64(maxGlyphs), repeat: Int32(0))
+                // 初始化字形宽度数组（用 numGlyphs 确保 CJK 等大字形集不越界）
+                let maxGlyphs = if (numGlyphs > numberOfHMetrics) { Int64(numGlyphs) + 1 } else { Int64(numberOfHMetrics) + 1 }
+                glyphWidths = Array<Int32>(maxGlyphs, repeat: Int32(0))
 
                 // 读取前 numberOfHMetrics 个字形的宽度
                 var lastAdvanceWidth: Int32 = 0
@@ -762,9 +762,8 @@ public class TrueTypeFont {
         var totalWidth: Int64 = 0
         var lastGlyphId: UInt16 = 0
 
-        for (ch in text) {
-            // Rune 可以直接转换为 Int64，然后转为 UInt32
-            let unicode = UInt32(Int64(ch))
+        for (ch in text.runes()) {
+            let unicode = UInt32(ch)
             let glyphId = getGlyphId(unicode)
             let width = getGlyphWidth(glyphId)
             totalWidth += Int64(width)

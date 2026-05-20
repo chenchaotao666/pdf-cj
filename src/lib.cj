@@ -44,6 +44,15 @@ public import pdf_cj.codec.{
     FlateEncoder, ASCIIHexEncoder, ASCII85Encoder
 }
 
+// 导出注释模块
+public import pdf_cj.form.{
+    PdfAnnotation, PdfAnnotationFactory,
+    PdfAnnotationText, PdfAnnotationLink, PdfAnnotationHighlight,
+    PdfAnnotationFreeText, PdfAnnotationStamp,
+    PdfAnnotationUnderline, PdfAnnotationStrikeOut,
+    PdfAnnotationSquare, PdfAnnotationCircle
+}
+
 // 导出书签模块
 public import pdf_cj.form.{
     PdfOutline, PdfOutlineTree, PdfOutlineBuilder,

@@ -58,6 +58,14 @@ public class FontSubsetting {
         usedGlyphs.contains(glyphId)
     }
 
+    public func getUsedGlyphIds(): ArrayList<UInt16> {
+        let result = ArrayList<UInt16>()
+        for ((gid, _) in usedGlyphs) {
+            result.add(gid)
+        }
+        result
+    }
+
     // 保留旧接口兼容（不再用于子集生成，但外部可能调用）
     public func buildGlyphMapping(): Unit {
         var sorted = ArrayList<UInt16>()

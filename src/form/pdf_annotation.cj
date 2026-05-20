@@ -408,11 +408,27 @@ public class PdfAnnotationCircle <: PdfAnnotation {
  */
 public class PdfAnnotationFactory {
     /**
-     * 创建文本注释
+     * 创建文本注释（简化版，坐标点）
      */
     public static func createText(x: Float32, y: Float32, contents: String): PdfAnnotationText {
         let rect = Rectangle(x, y, x + 20.0, y + 20.0)
         PdfAnnotationText(rect, contents)
+    }
+
+    /**
+     * 创建文本注释（完整版）
+     * @param rect    注释图标位置
+     * @param title   标题（作者）
+     * @param contents 注释内容
+     * @param open    是否默认展开
+     * @param icon    图标名称（Note/Comment/Key/Help 等）
+     */
+    public static func createText(rect: Rectangle, title: String, contents: String, open: Bool, icon: String): PdfAnnotationText {
+        let annot = PdfAnnotationText(rect, contents)
+        annot.setTitle(title)
+        annot.setOpen(open)
+        annot.setIcon(icon)
+        annot
     }
 
     /**
@@ -442,9 +458,53 @@ public class PdfAnnotationFactory {
     }
 
     /**
+     * 创建下划线注释
+     */
+    public static func createUnderline(rect: Rectangle, quadPoints: Array<Float32>): PdfAnnotationUnderline {
+        let underline = PdfAnnotationUnderline(rect)
+        underline.setQuadPoints(quadPoints)
+        underline
+    }
+
+    /**
+     * 创建删除线注释
+     */
+    public static func createStrikeOut(rect: Rectangle, quadPoints: Array<Float32>): PdfAnnotationStrikeOut {
+        let strikeOut = PdfAnnotationStrikeOut(rect)
+        strikeOut.setQuadPoints(quadPoints)
+        strikeOut
+    }
+
+    /**
+     * 创建自由文本注释（直接显示在页面上）
+     * @param rect               文本区域
+     * @param contents           显示内容
+     * @param defaultAppearance  DA 字符串，如 "/Helvetica 12 Tf 0 g"
+     */
+    public static func createFreeText(rect: Rectangle, contents: String, defaultAppearance: String): PdfAnnotationFreeText {
+        let annot = PdfAnnotationFreeText(rect, contents)
+        annot.setDefaultAppearance(defaultAppearance)
+        annot
+    }
+
+    /**
      * 创建图章注释
      */
     public static func createStamp(rect: Rectangle, stampName: String): PdfAnnotationStamp {
         PdfAnnotationStamp(rect, stampName)
+    }
+
+    /**
+     * 创建矩形注释
+     */
+    public static func createSquare(rect: Rectangle): PdfAnnotationSquare {
+        PdfAnnotationSquare(rect)
+    }
+
+    /**
+     * 创建圆形注释
+     */
+    public static func createCircle(rect: Rectangle): PdfAnnotationCircle {
+        PdfAnnotationCircle(rect)
     }
 }

@@ -66,6 +66,9 @@ public class PdfWriter <: DocListener {
     // 延迟写入的 CIDToGIDMap 流（在字体文件写入后，glyphMapping 就绪后写入）
     private var _pendingCIDToGIDMaps: ArrayList<PendingCIDToGIDMap> = ArrayList<PendingCIDToGIDMap>()
 
+    // 延迟写入的 W 数组（字形宽度，在所有文字渲染后写入以确保 usedGlyphs 完整）
+    private var _pendingWArrays: ArrayList<PendingWArray> = ArrayList<PendingWArray>()
+
     // 当前页面预留对象编号（在 newPage() 时分配，供 completePage() 和书签引用使用）
     private var _currentPageObjNum: Int32 = 0
 
@@ -178,6 +181,12 @@ public class PdfWriter <: DocListener {
         for (pending in _pendingFontFiles) {
             let fontStream = createFontFileStream(pending.ttf, pending.baseFont)
             _body.add(fontStream, pending.objNum)
+        }
+
+        // 写入 W 数组（各字形实际宽度，使 PDF 渲染与换行测量一致）
+        for (pending in _pendingWArrays) {
+            let wArray = buildWArray(pending.baseFont)
+            _body.add(wArray, pending.objNum)
         }
 
         // 写入 CIDToGIDMap 流（依赖上方 generateSubsetFont 已填充的 glyphMapping）
@@ -644,29 +653,74 @@ public class PdfWriter <: DocListener {
         // 段前间距
         _currentY -= para.spacingBefore
 
-        // 检查是否需要分页
-        let estimatedHeight = para.getTotalHeight()
-        if (_currentY - estimatedHeight < _marginBottom) {
+        // 若连一行都放不下则换页
+        if (_currentY - para.leading < _marginBottom) {
             newPage()
         }
 
         // 通知段落开始
         fireOnParagraph(_currentY)
 
-        // 计算段落位置
-        let leftX = _marginLeft + para.indentationLeft + para.firstLineIndent
+        // 计算段落可用宽度（首行有额外缩进）
+        let leftX = _marginLeft + para.indentationLeft
+        let firstLineLeftX = leftX + para.firstLineIndent
         let rightX = _pageSize.width - _marginRight - para.indentationRight
-        let width = rightX - leftX
 
-        // 绘制段落内容
-        var currentX = leftX
+        // currentX 追踪当前行的绘制起点
+        var currentX: Float32 = firstLineLeftX
+        var isFirstLine = true
+
         for (chunk in para.getChunks()) {
-            drawChunk(chunk, currentX, _currentY, para.alignment)
-            // 累加当前 chunk 的宽度，以便下一个 chunk 能正确排列
-            currentX += chunk.getWidthPoint()
+            let font = chunk.font
+            let baseFont = font.getCalculatedBaseFont()
+
+            // 逐字符（Rune）遍历，按可用宽度自动换行
+            var lineText = ""
+            var lineWidth: Float32 = 0.0
+
+            for (r in chunk.content.runes()) {
+                let charStr = String([r])
+                let charWidth = baseFont.getWidthPoint(charStr, font.size)
+                let lineStart: Float32 = if (isFirstLine) { firstLineLeftX } else { leftX }
+
+                // 当前行已有内容且加上此字符会超出右边界：换行
+                if (currentX + lineWidth + charWidth > rightX &&
+                    (!lineText.isEmpty() || currentX > lineStart)) {
+                    if (!lineText.isEmpty()) {
+                        let lineChunk = Chunk(lineText, font)
+                        match (chunk.color) {
+                            case Some(c) => _ = lineChunk.setColor(c)
+                            case None => ()
+                        }
+                        drawChunk(lineChunk, currentX, _currentY, para.alignment)
+                    }
+                    _currentY -= para.leading
+                    if (_currentY < _marginBottom) {
+                        newPage()
+                    }
+                    currentX = leftX
+                    isFirstLine = false
+                    lineText = charStr
+                    lineWidth = charWidth
+                } else {
+                    lineText += charStr
+                    lineWidth += charWidth
+                }
+            }
+
+            // 绘制本 chunk 剩余内容
+            if (!lineText.isEmpty()) {
+                let lineChunk = Chunk(lineText, font)
+                match (chunk.color) {
+                    case Some(c) => _ = lineChunk.setColor(c)
+                    case None => ()
+                }
+                drawChunk(lineChunk, currentX, _currentY, para.alignment)
+                currentX += lineWidth
+            }
         }
 
-        // 更新 Y 位置
+        // 最后一行结束后下移一行
         _currentY -= para.leading
 
         // 段后间距
@@ -1590,8 +1644,13 @@ public class PdfWriter <: DocListener {
         cidFont.put(PdfName.BASEFONT, PdfName(baseFont.name))
         cidFont.put(PdfName("CIDSystemInfo"), cidSystemInfo)
 
-        // 添加默认宽度
+        // 添加默认宽度（CJK 全角字符通常为 1000 单位）
         cidFont.put(PdfName("DW"), PdfNumber(1000))
+
+        // 预留 W 数组对象编号（在 close() 时根据实际使用的字形写入实际宽度）
+        let wArrayObjNum = _body.reserveObjectNumber()
+        cidFont.put(PdfName("W"), PdfIndirectReference(wArrayObjNum))
+        _pendingWArrays.add(PendingWArray(wArrayObjNum, baseFont))
 
         // CIDToGIDMap：仅 TrueType（CIDFontType2）需要
         // 嵌入字体使用流式 CIDToGIDMap（旧 GID → 紧凑新 GID），未嵌入字体用 Identity
@@ -1631,6 +1690,42 @@ public class PdfWriter <: DocListener {
         // 这里暂时省略，因为需要创建完整的 CMap
 
         _body.add(fontDict)
+    }
+
+    /**
+     * 构建 CIDFont W 数组（仅包含与 DW 不同的字形宽度）
+     * W 数组格式：[glyphId [width] glyphId [width] ...]
+     */
+    private func buildWArray(baseFont: BaseFont): PdfArray {
+        let wArray = PdfArray()
+        match (baseFont.getTrueTypeFont()) {
+            case Some(ttf) =>
+                let unitsPerEm = ttf.getUnitsPerEm()
+                if (unitsPerEm <= 0) {
+                    return wArray
+                }
+                let dwUnits: Int32 = 1000  // 对应 DW=1000
+
+                // 收集所有已用字形 ID（嵌入字体通过 FontSubsetting 跟踪）
+                let glyphIds: ArrayList<UInt16> = match (baseFont.getFontSubset()) {
+                    case Some(subset) => subset.getUsedGlyphIds()
+                    case None => ArrayList<UInt16>()
+                }
+
+                for (gid in glyphIds) {
+                    let widthInFontUnits = ttf.getGlyphWidth(gid)
+                    // 转换为 PDF 字体单位（以 1000 为基准）
+                    let widthIn1000: Int32 = (widthInFontUnits * 1000) / unitsPerEm
+                    if (widthIn1000 != dwUnits) {
+                        wArray.add(PdfNumber(Int32(gid)))
+                        let entry = PdfArray()
+                        entry.add(PdfNumber(widthIn1000))
+                        wArray.add(entry)
+                    }
+                }
+            case None => ()
+        }
+        wArray
     }
 
     /**
@@ -1875,6 +1970,16 @@ class PendingFontFile {
  * 在字体文件写入（generateSubsetFont 填充 glyphMapping）之后写入
  */
 class PendingCIDToGIDMap {
+    public let objNum: Int32
+    public let baseFont: BaseFont
+
+    public init(objNum: Int32, baseFont: BaseFont) {
+        this.objNum = objNum
+        this.baseFont = baseFont
+    }
+}
+
+class PendingWArray {
     public let objNum: Int32
     public let baseFont: BaseFont
 
