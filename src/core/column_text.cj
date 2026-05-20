@@ -6,12 +6,27 @@ package pdf_cj.core
 
 import std.collection.ArrayList
 import pdf_cj.api.{Element, Paragraph, Phrase, Chunk}
-import pdf_cj.text.{Alignment, Font}
+import pdf_cj.text.{Alignment, Font, Color, BaseFont}
 import pdf_cj.util.Rectangle
 
 /**
+ * 行内文本段（同一字体/颜色的连续文字）
+ */
+class TextSegment {
+    let text: String
+    let font: Font
+    let color: ?Color
+
+    init(text: String, font: Font, color: ?Color) {
+        this.text = text
+        this.font = font
+        this.color = color
+    }
+}
+
+/**
  * 列文本类
- * 用于在指定矩形区域内排版文本
+ * 用于在指定矩形区域内排版文本，支持多行换行和列溢出处理。
  */
 public class ColumnText {
     private var _canvas: PdfContentByte
@@ -23,7 +38,7 @@ public class ColumnText {
     private var _urx: Float32 = 0.0
     private var _ury: Float32 = 0.0
 
-    // 当前位置
+    // 当前排版 Y 位置
     private var _currentY: Float32 = 0.0
 
     // 文本属性
@@ -34,13 +49,12 @@ public class ColumnText {
     private var _indent: Float32 = 0.0
     private var _followingIndent: Float32 = 0.0
     private var _rightIndent: Float32 = 0.0
-    private var _extraParagraphSpace: Float32 = 0.0
     private var _spaceCharRatio: Float32 = 1.0
 
-    // 待排版内容
+    // 待排版内容队列
     private var _compositeElements: ArrayList<Element> = ArrayList<Element>()
 
-    // 状态常量
+    // go() 返回值
     public static let NO_MORE_TEXT: Int32 = 0
     public static let NO_MORE_COLUMN: Int32 = 1
     private static let CONTINUE_PROCESSING: Int32 = 2
@@ -49,8 +63,12 @@ public class ColumnText {
         this._canvas = canvas
     }
 
+    // ───────────────────────────────────────────
+    // 列边界设置
+    // ───────────────────────────────────────────
+
     /**
-     * 设置简单列模式的边界
+     * 设置列边界（llx/lly 为左下角，urx/ury 为右上角）
      */
     public func setSimpleColumn(llx: Float32, lly: Float32, urx: Float32, ury: Float32): Unit {
         _llx = llx
@@ -62,14 +80,14 @@ public class ColumnText {
     }
 
     /**
-     * 设置简单列模式的边界（使用矩形）
+     * 设置列边界（Rectangle 版本）
      */
     public func setSimpleColumn(rect: Rectangle): Unit {
         setSimpleColumn(rect.left, rect.bottom, rect.right, rect.top)
     }
 
     /**
-     * 设置简单列模式的边界（带对齐和行距）
+     * 设置列边界（带行距和对齐方式）
      */
     public func setSimpleColumn(llx: Float32, lly: Float32, urx: Float32, ury: Float32,
                                  leading: Float32, alignment: Alignment): Unit {
@@ -79,62 +97,70 @@ public class ColumnText {
     }
 
     /**
-     * 添加元素
+     * 设置列边界（OpenPDF 兼容接口，参数顺序：left, right, bottom, top）
+     */
+    public func addSimpleColumn(left: Float32, right: Float32, bottom: Float32, top: Float32): Unit {
+        setSimpleColumn(left, bottom, right, top)
+    }
+
+    // ───────────────────────────────────────────
+    // 内容管理
+    // ───────────────────────────────────────────
+
+    /**
+     * 追加元素到排版队列
      */
     public func addElement(element: Element): Unit {
         _compositeElements.add(element)
     }
 
     /**
-     * 添加文本
+     * 追加 Phrase 到排版队列
      */
     public func addText(phrase: Phrase): Unit {
         _compositeElements.add(phrase)
     }
 
     /**
-     * 设置文本
+     * 清空队列并设置单个 Phrase
      */
     public func setText(phrase: Phrase): Unit {
         _compositeElements.clear()
         _compositeElements.add(phrase)
     }
 
+    // ───────────────────────────────────────────
+    // 排版执行
+    // ───────────────────────────────────────────
+
     /**
-     * 执行排版
-     * @return NO_MORE_TEXT 或 NO_MORE_COLUMN
+     * 执行排版并绘制
+     * @return NO_MORE_TEXT（所有内容已排完）或 NO_MORE_COLUMN（列空间已满）
      */
     public func go(): Int32 {
         goComposite(false)
     }
 
     /**
-     * 模拟排版（不实际绘制）
+     * 模拟排版（仅推进 Y 位置，不绘制）
      * @return NO_MORE_TEXT 或 NO_MORE_COLUMN
      */
     public func goSimulate(): Int32 {
         goComposite(true)
     }
 
-    /**
-     * 执行复合元素排版
-     */
     private func goComposite(simulate: Bool): Int32 {
         if (_compositeElements.isEmpty()) {
             return NO_MORE_TEXT
         }
 
-        let width = _urx - _llx - _indent - _followingIndent - _rightIndent
-
         while (!_compositeElements.isEmpty()) {
             let element = _compositeElements[0]
-
             let status = match (element.getType()) {
                 case Paragraph => handleParagraphElement(element, simulate)
                 case Phrase => handlePhraseElement(element, simulate)
-                case _ => handleUnknownElement(element)
+                case _ => skipUnknownElement()
             }
-
             if (status != CONTINUE_PROCESSING) {
                 return status
             }
@@ -143,67 +169,191 @@ public class ColumnText {
         NO_MORE_TEXT
     }
 
-    /**
-     * 处理段落元素
-     */
     private func handleParagraphElement(element: Element, simulate: Bool): Int32 {
         match (element) {
             case para: Paragraph => processParagraph(para, simulate)
-            case _ => removeAndContinue()
+            case _ => skipUnknownElement()
         }
     }
 
-    /**
-     * 处理短语元素
-     */
     private func handlePhraseElement(element: Element, simulate: Bool): Int32 {
         match (element) {
             case phrase: Phrase => processPhrase(phrase, simulate)
-            case _ => removeAndContinue()
+            case _ => skipUnknownElement()
         }
     }
 
-    /**
-     * 处理未知元素
-     */
-    private func handleUnknownElement(element: Element): Int32 {
-        removeAndContinue()
-    }
-
-    /**
-     * 处理段落
-     */
-    private func processParagraph(para: Paragraph, simulate: Bool): Int32 {
-        let lineHeight = if (_leading > 0.0) {
-            _leading
-        } else {
-            para.leading
-        }
-
-        // 检查是否有足够空间
-        if (_currentY - lineHeight < _lly) {
-            return NO_MORE_COLUMN
-        }
-
-        // 排版段落
-        if (!simulate) {
-            drawParagraph(para)
-        }
-
-        _currentY -= lineHeight
+    private func skipUnknownElement(): Int32 {
         _compositeElements.remove(0..1)
         CONTINUE_PROCESSING
     }
 
+    // ───────────────────────────────────────────
+    // 行构建（字符级换行）
+    // ───────────────────────────────────────────
+
     /**
-     * 处理短语
+     * 将段落的所有 Chunk 按列宽分割成行。
+     * 每行是一个 ArrayList<TextSegment>，代表该行内来自不同 Chunk 的文本段。
+     */
+    private func buildLines(para: Paragraph): ArrayList<ArrayList<TextSegment>> {
+        let allLines = ArrayList<ArrayList<TextSegment>>()
+        var currentLine = ArrayList<TextSegment>()
+        var lineWidth: Float32 = 0.0
+        var isFirstLine = true
+
+        let leftX  = _llx + _indent + para.indentationLeft
+        let rightX = _urx - _rightIndent - para.indentationRight
+
+        for (chunk in para.getChunks()) {
+            let font      = chunk.font
+            let baseFont  = font.getCalculatedBaseFont()
+            let color     = chunk.color
+            var segText   = ""
+            var segWidth: Float32 = 0.0
+
+            for (r in chunk.content.runes()) {
+                let charStr   = String([r])
+                let charWidth = baseFont.getWidthPoint(charStr, font.size)
+                let availWidth = if (isFirstLine) {
+                    rightX - leftX - para.firstLineIndent
+                } else {
+                    rightX - leftX
+                }
+
+                if (lineWidth + segWidth + charWidth > availWidth && lineWidth + segWidth > 0.0) {
+                    if (!segText.isEmpty()) {
+                        currentLine.add(TextSegment(segText, font, color))
+                    }
+                    allLines.add(currentLine)
+                    currentLine = ArrayList<TextSegment>()
+                    lineWidth = 0.0
+                    isFirstLine = false
+                    segText = charStr
+                    segWidth = charWidth
+                } else {
+                    segText += charStr
+                    segWidth += charWidth
+                }
+            }
+
+            if (!segText.isEmpty()) {
+                currentLine.add(TextSegment(segText, font, color))
+                lineWidth += segWidth
+            }
+        }
+
+        if (!currentLine.isEmpty()) {
+            allLines.add(currentLine)
+        }
+
+        allLines
+    }
+
+    // ───────────────────────────────────────────
+    // 段落排版（支持溢出截断）
+    // ───────────────────────────────────────────
+
+    private func processParagraph(para: Paragraph, simulate: Bool): Int32 {
+        let lineHeight = if (_leading > 0.0) { _leading } else { para.leading }
+        let leftX      = _llx + _indent + para.indentationLeft
+
+        let allLines = buildLines(para)
+        if (allLines.isEmpty()) {
+            _compositeElements.remove(0..1)
+            return CONTINUE_PROCESSING
+        }
+
+        var linesDrawn: Int64 = 0
+
+        for (i in 0..allLines.size) {
+            if (_currentY - lineHeight < _lly) {
+                break
+            }
+            let lineX = if (i == 0) { leftX + para.firstLineIndent } else { leftX }
+            if (!simulate) {
+                drawLine(allLines[i], lineX, _currentY)
+            }
+            _currentY -= lineHeight
+            linesDrawn += 1
+        }
+
+        if (linesDrawn == 0) {
+            return NO_MORE_COLUMN
+        }
+
+        if (linesDrawn == allLines.size) {
+            _currentY -= para.spacingAfter
+            _compositeElements.remove(0..1)
+            return CONTINUE_PROCESSING
+        }
+
+        // 部分绘制：把剩余行重建为新 Paragraph，放回队列头部
+        let remainPara = Paragraph(lineHeight)
+        remainPara.setAlignment(para.alignment)
+        remainPara.setIndentationLeft(para.indentationLeft)
+        remainPara.setIndentationRight(para.indentationRight)
+        remainPara.setSpacingAfter(para.spacingAfter)
+
+        for (i in linesDrawn..allLines.size) {
+            let line = allLines[i]
+            for (seg in line) {
+                let chunk = Chunk(seg.text, seg.font)
+                match (seg.color) {
+                    case Some(c) => _ = chunk.setColor(c)
+                    case None => ()
+                }
+                remainPara.add(chunk)
+            }
+        }
+
+        _compositeElements.remove(0..1)
+        let newList = ArrayList<Element>()
+        newList.add(remainPara)
+        for (i in 0.._compositeElements.size) {
+            newList.add(_compositeElements[i])
+        }
+        _compositeElements = newList
+
+        NO_MORE_COLUMN
+    }
+
+    // ───────────────────────────────────────────
+    // 绘制
+    // ───────────────────────────────────────────
+
+    /**
+     * 绘制一行（由多个 TextSegment 组成）
+     */
+    private func drawLine(segments: ArrayList<TextSegment>, lineX: Float32, lineY: Float32): Unit {
+        var x = lineX
+        let writer = _canvas.getWriter()
+
+        for (seg in segments) {
+            let baseFont = seg.font.getCalculatedBaseFont()
+            let fontName = writer.addFont(baseFont)
+            let useUnicode = baseFont.isUnicodeEncoding()
+            baseFont.markStringUsed(seg.text)
+
+            _canvas.beginText()
+            _canvas.setFontAndSize(fontName, seg.font.size)
+            match (seg.color) {
+                case Some(c) => _canvas.setColorFill(c)
+                case None => _canvas.setColorFill(Color.BLACK)
+            }
+            _canvas.setTextMatrix(x, lineY)
+            _canvas.showText(seg.text, useUnicode, Some(baseFont))
+            _canvas.endText()
+
+            x += baseFont.getWidthPoint(seg.text, seg.font.size)
+        }
+    }
+
+    /**
+     * 处理短语（单行，不换行）
      */
     private func processPhrase(phrase: Phrase, simulate: Bool): Int32 {
-        let lineHeight = if (_leading > 0.0) {
-            _leading
-        } else {
-            phrase.leading
-        }
+        let lineHeight = if (_leading > 0.0) { _leading } else { phrase.leading }
 
         if (_currentY - lineHeight < _lly) {
             return NO_MORE_COLUMN
@@ -219,72 +369,37 @@ public class ColumnText {
     }
 
     /**
-     * 移除当前元素并继续处理
-     */
-    private func removeAndContinue(): Int32 {
-        _compositeElements.remove(0..1)
-        CONTINUE_PROCESSING
-    }
-
-    /**
-     * 绘制段落
-     */
-    private func drawParagraph(para: Paragraph): Unit {
-        let x = _llx + _indent + para.firstLineIndent
-        _canvas.beginText()
-        _canvas.setTextMatrix(x, _currentY)
-
-        for (chunk in para.getChunks()) {
-            let font = chunk.font
-            let baseFont = font.getCalculatedBaseFont()
-
-            // 应用颜色（如果有）
-            match (chunk.color) {
-                case Some(color) => _canvas.setColorFill(color)
-                case None => ()
-            }
-
-            // 获取并使用正确的字体名称
-            let fontName = _canvas.getWriter().addFont(baseFont)
-            _canvas.setFontAndSize(fontName, font.size)
-            _canvas.showText(chunk.content)
-        }
-
-        _canvas.endText()
-    }
-
-    /**
-     * 绘制短语
+     * 绘制短语（按顺序绘制各 Chunk，不换行）
      */
     private func drawPhrase(phrase: Phrase): Unit {
-        let x = _llx + _indent
-        _canvas.beginText()
-        _canvas.setTextMatrix(x, _currentY)
+        let writer = _canvas.getWriter()
+        var x = _llx + _indent
 
         for (chunk in phrase.getChunks()) {
-            let font = chunk.font
-            let baseFont = font.getCalculatedBaseFont()
+            let font      = chunk.font
+            let baseFont  = font.getCalculatedBaseFont()
+            let fontName  = writer.addFont(baseFont)
+            let useUnicode = baseFont.isUnicodeEncoding()
+            baseFont.markStringUsed(chunk.content)
 
-            // 应用颜色（如果有）
-            match (chunk.color) {
-                case Some(color) => _canvas.setColorFill(color)
-                case None => ()
-            }
-
-            // 获取并使用正确的字体名称
-            let fontName = _canvas.getWriter().addFont(baseFont)
+            _canvas.beginText()
             _canvas.setFontAndSize(fontName, font.size)
-            _canvas.showText(chunk.content)
-        }
+            match (chunk.color) {
+                case Some(c) => _canvas.setColorFill(c)
+                case None => _canvas.setColorFill(Color.BLACK)
+            }
+            _canvas.setTextMatrix(x, _currentY)
+            _canvas.showText(chunk.content, useUnicode, Some(baseFont))
+            _canvas.endText()
 
-        _canvas.endText()
+            x += baseFont.getWidthPoint(chunk.content, font.size)
+        }
     }
 
-    // ===== 属性访问器 =====
+    // ───────────────────────────────────────────
+    // 属性访问器
+    // ───────────────────────────────────────────
 
-    /**
-     * 获取/设置对齐方式
-     */
     public prop alignment: Alignment {
         get() { _alignment }
     }
@@ -293,9 +408,6 @@ public class ColumnText {
         _alignment = alignment
     }
 
-    /**
-     * 获取/设置行距
-     */
     public prop leading: Float32 {
         get() { _leading }
     }
@@ -309,9 +421,6 @@ public class ColumnText {
         _multipliedLeading = multipliedLeading
     }
 
-    /**
-     * 获取/设置缩进
-     */
     public prop indent: Float32 {
         get() { _indent }
     }
@@ -336,9 +445,6 @@ public class ColumnText {
         _rightIndent = indent
     }
 
-    /**
-     * 获取当前 Y 位置
-     */
     public prop yLine: Float32 {
         get() { _currentY }
     }
@@ -347,16 +453,10 @@ public class ColumnText {
         _currentY = y
     }
 
-    /**
-     * 检查是否还有更多文本
-     */
     public func hasMoreText(): Bool {
         !_compositeElements.isEmpty()
     }
 
-    /**
-     * 获取剩余文本的估计高度
-     */
     public func getFilledHeight(): Float32 {
         _ury - _currentY
     }
