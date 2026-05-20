@@ -87,7 +87,7 @@ public func bookmark2_nested(): Unit {
         document.add(Paragraph("1.1  背景", cjkBold(14.0)))
         let sec11Ref = writer.getCurrentPageReference()
         ch1.addChild(PdfOutline("1.1  背景", PdfDestination(sec11Ref)))
-        document.add(Paragraph("仓颉是华为发布的新一代编程语言，面向全场景智能终端。", bodyFont))
+        document.add(Paragraph("仓颉是华为发布的新一代编程语言，面向全场景智能终端。仓颉是华为发布的新一代编程语言，面向全场景智能终端。仓颉是华为发布的新一代编程语言，面向全场景智能终端。", bodyFont))
 
         document.add(Paragraph("1.2  设计目标", cjkBold(14.0)))
         let sec12Ref = writer.getCurrentPageReference()
