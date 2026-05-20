@@ -26,6 +26,7 @@ public class PdfReader {
     private var pageContentsCache: HashMap<Int32, Array<UInt8>> = HashMap<Int32, Array<UInt8>>()
     private var infoDict: ?HashMap<String, String> = None
     private var acroFieldsInstance: ?AcroFields = None
+    var pageObjectNumbers: ArrayList<Int32> = ArrayList<Int32>()
 
     /**
      * 从文件路径构造
@@ -136,7 +137,7 @@ public class PdfReader {
         match (resolveToDict(pagesObj)) {
             case Some(d) =>
                 this.pages = Some(d)
-                collectPages(d)
+                collectPages(d, pagesRef)
                 this.numberOfPages = Int32(pageList.size)
             case None => ()
         }
@@ -171,7 +172,7 @@ public class PdfReader {
     /**
      * 递归遍历 Pages 树，收集叶子 Page 字典和对应的页面尺寸
      */
-    private func collectPages(dict: PdfDictionary): Unit {
+    private func collectPages(dict: PdfDictionary, objNum: Int32): Unit {
         let typeStr = match (dict.getAsName(PdfName("Type"))) {
             case Some(n) => n.name
             case None => "Page"
@@ -182,9 +183,18 @@ public class PdfReader {
                 case Some(kids) =>
                     for (i in 0..kids.size) {
                         let kidObj = kids.get(i)
-                        match (resolveToDict(kidObj)) {
-                            case Some(d) => collectPages(d)
-                            case None => ()
+                        match (kidObj) {
+                            case ref: PdfIndirectReference =>
+                                match (resolveRef(ref.objectNumber)) {
+                                    case Some(resolved) =>
+                                        match (resolved) {
+                                            case d: PdfDictionary => collectPages(d, ref.objectNumber)
+                                            case _ => ()
+                                        }
+                                    case None => ()
+                                }
+                            case d: PdfDictionary => collectPages(d, 0)
+                            case _ => ()
                         }
                     }
                 case None => ()
@@ -194,6 +204,7 @@ public class PdfReader {
             let mediaBox = extractMediaBox(dict)
             pageList.add(dict)
             pageSizes.add(mediaBox)
+            pageObjectNumbers.add(objNum)
         }
     }
 
@@ -439,9 +450,62 @@ public class PdfReader {
         numberOfPages = 0
         pageList = ArrayList<PdfDictionary>()
         pageSizes = ArrayList<Rectangle>()
+        pageObjectNumbers = ArrayList<Int32>()
         pageContentsCache = HashMap<Int32, Array<UInt8>>()
         infoDict = None
         acroFieldsInstance = None
+    }
+
+    /**
+     * 获取指定页（从 1 开始）的对象编号
+     */
+    public func getPageObjectNumber(pageNum: Int32): Int32 {
+        let idx = Int64(pageNum - 1)
+        if (idx >= 0 && idx < pageObjectNumbers.size) {
+            return pageObjectNumbers[idx]
+        }
+        0
+    }
+
+    /**
+     * 获取 xref 表中最大的对象编号
+     */
+    public func getMaxObjectNumber(): Int32 {
+        match (xrefTable) {
+            case Some(xref) =>
+                let nums = xref.getAllObjectNumbers()
+                var maxNum: Int32 = 0
+                for (i in 0..nums.size) {
+                    if (nums[i] > maxNum) { maxNum = nums[i] }
+                }
+                maxNum
+            case None => 0
+        }
+    }
+
+    /**
+     * 获取 startxref 偏移
+     */
+    public func getStartXRefOffset(): Int64 {
+        XRefParser.findStartXRef(fileData)
+    }
+
+    /**
+     * 获取根对象（/Root）编号
+     */
+    public func getRootObjectNumber(): Int32 {
+        match (xrefTable) {
+            case Some(xref) =>
+                match (xref.getTrailer()) {
+                    case Some(t) =>
+                        match (t.get("Root")) {
+                            case Some(ref) => parseObjNumFromRef(ref)
+                            case None => 1
+                        }
+                    case None => 1
+                }
+            case None => 1
+        }
     }
 
     // ─── Legacy / Utility ──────────────────────────────────────────────────────

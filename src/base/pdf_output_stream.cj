@@ -171,7 +171,7 @@ public class PdfByteArrayOutputStream <: PdfOutputStream {
 
     public func writeString(s: String): Unit {
         for (c in s) {
-            buffer.add(ByteWrapper(UInt8(c)))
+            write(UInt8(c))
         }
     }
 
