@@ -324,7 +324,7 @@ public class PdfImportedPage {
     /**
      * 获取页面内容
      */
-    public func getContent(): ?PdfDictionary {
+    public func getContent(): Array<UInt8> {
         reader.getPageContent(pageNumber)
     }
 
