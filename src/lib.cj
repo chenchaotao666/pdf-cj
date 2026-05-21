@@ -66,3 +66,8 @@ public import pdf_cj.base.{
     PdfName, PdfArray, PdfDictionary, PdfStream,
     PdfIndirectReference
 }
+
+// 导出文本提取模块
+public import pdf_cj.reader.{
+    TextFragment, ContentStreamParser, TextExtractor
+}
