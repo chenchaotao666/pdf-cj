@@ -17,6 +17,7 @@ import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
 import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser}
 import pdf_cj.form.{PdfAnnotation, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination}
 import pdf_cj.codec.FlateEncoder
+import pdf_cj.security.PdfEncryption
 import zlib4cj.{Zlib, ZlibType}
 
 /**
@@ -89,6 +90,9 @@ public class PdfWriter <: DocListener {
 
     // 页面事件监听器
     private var _pageEvent: ?PdfPageEvent = None
+
+    // 加密
+    private var _encryption: ?PdfEncryption = None
 
     // PDF 版本
     public static let PDF_VERSION_1_4 = "1.4"
@@ -180,6 +184,7 @@ public class PdfWriter <: DocListener {
         // 写入延迟的字体文件（此时所有字形已经标记完毕，generateSubsetFont 会填充 glyphMapping）
         for (pending in _pendingFontFiles) {
             let fontStream = createFontFileStream(pending.ttf, pending.baseFont)
+            encryptStream(fontStream, pending.objNum)
             _body.add(fontStream, pending.objNum)
         }
 
@@ -196,6 +201,7 @@ public class PdfWriter <: DocListener {
                     let cidToGIDData = subset.buildCIDToGIDMapData()
                     let stream = PdfStream()
                     stream.setContent(cidToGIDData)
+                    encryptStream(stream, pending.objNum)
                     _body.add(stream, pending.objNum)
                 case None => ()
             }
@@ -263,11 +269,19 @@ public class PdfWriter <: DocListener {
         // 写入文档信息
         let infoRef = _body.add(_info.dictionary, infoObjNum)
 
+        // 写入加密字典（必须在 writeXref() 之前，才能进入 xref 表）
+        let encryptRef: ?PdfIndirectReference = match (_encryption) {
+            case Some(enc) =>
+                let encObjNum = _body.reserveObjectNumber()
+                Some(_body.add(enc.getEncryptionDictionary(), encObjNum))
+            case None => None
+        }
+
         // 写入交叉引用表
         let xrefPos = _body.writeXref()
 
         // 写入 Trailer
-        writeTrailer(catalogRef, infoRef, xrefPos)
+        writeTrailer(catalogRef, infoRef, xrefPos, encryptRef)
 
         // 刷新并关闭
         _outputStream.flush()
@@ -517,7 +531,8 @@ public class PdfWriter <: DocListener {
     /**
      * 写入 Trailer
      */
-    private func writeTrailer(catalogRef: PdfIndirectReference, infoRef: PdfIndirectReference, xrefPos: Int64): Unit {
+    private func writeTrailer(catalogRef: PdfIndirectReference, infoRef: PdfIndirectReference,
+                              xrefPos: Int64, encryptRef: ?PdfIndirectReference): Unit {
         _outputStream.writeString("trailer")
         _outputStream.writeNewLine()
 
@@ -525,6 +540,22 @@ public class PdfWriter <: DocListener {
         trailer.put(PdfName.SIZE, PdfNumber(Int32(_body.objectCount + 1)))
         trailer.put(PdfName.ROOT, catalogRef)
         trailer.put(PdfName.INFO, infoRef)
+
+        // 加密字典引用 + 文件 ID（加密字典对象已在 xref 之前写入）
+        match (encryptRef) {
+            case Some(ref) =>
+                trailer.put(PdfName("Encrypt"), ref)
+                match (_encryption) {
+                    case Some(enc) =>
+                        let fileId = enc.getFileID()
+                        let idArr  = PdfArray()
+                        idArr.add(PdfString(fileId))
+                        idArr.add(PdfString(fileId))
+                        trailer.put(PdfName("ID"), idArr)
+                    case None => ()
+                }
+            case None => ()
+        }
 
         trailer.writeTo(_outputStream)
         _outputStream.writeNewLine()
@@ -562,7 +593,9 @@ public class PdfWriter <: DocListener {
 
         // 写入内容流
         let contentStream = getContent().toStream()
-        let contentRef = _body.add(contentStream)
+        let contentObjNum = _body.reserveObjectNumber()
+        encryptStream(contentStream, contentObjNum)
+        let contentRef = _body.add(contentStream, contentObjNum)
         page.setContents(contentRef)
 
         // 设置资源
@@ -806,7 +839,9 @@ public class PdfWriter <: DocListener {
         let imageXObject = createImageXObject(image, rawData)
 
         // 添加到资源并获取名称
-        let imageRef = _body.add(imageXObject)
+        let imageObjNum = _body.reserveObjectNumber()
+        encryptStream(imageXObject, imageObjNum)
+        let imageRef = _body.add(imageXObject, imageObjNum)
         let imageName = _resources.addXObject(imageRef)
 
         // 计算图片位置
@@ -1891,6 +1926,27 @@ public class PdfWriter <: DocListener {
      */
     public func setPdfVersion(version: String): Unit {
         this._pdfVersion = version
+    }
+
+    /**
+     * 设置 PDF 加密
+     * 调用 document.open() 之前设置，确保 /Encrypt 写入 trailer。
+     */
+    public func setEncryption(enc: PdfEncryption): Unit {
+        this._encryption = Some(enc)
+    }
+
+    // 在把流加入 body 之前，用 per-object 密钥加密其内容
+    private func encryptStream(stream: PdfStream, objNum: Int32): Unit {
+        match (_encryption) {
+            case Some(enc) =>
+                let content = stream.getContent()
+                if (content.size > 0) {
+                    let encrypted = enc.encryptBytes(content, objNum, 0i32)
+                    stream.setContent(encrypted)
+                }
+            case None => ()
+        }
     }
 
     /**

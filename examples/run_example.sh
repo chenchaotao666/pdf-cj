@@ -27,8 +27,9 @@ if [ ! -f "$EXAMPLE_FILE" ]; then
 fi
 
 echo "编译示例: $EXAMPLE_NAME"
-# 设置 zlib4cj 动态库路径
-export LD_LIBRARY_PATH="../target/release/zlib4cj:$LD_LIBRARY_PATH"
+# 动态库搜索路径（可通过环境变量覆盖，默认 ~/.local/lib/hitls）
+HITLS_LIB="${HITLS_LIB:-${HOME}/.local/lib/hitls}"
+export LD_LIBRARY_PATH="../target/release/zlib4cj:${HITLS_LIB}:$LD_LIBRARY_PATH"
 
 # 链接所有必要的库文件（包括 zlib4cj）
 # pdf_cj 各子包之间存在反射元数据 (.ti) 的循环引用 (例如 text.a 依赖 base.a)。
@@ -53,6 +54,8 @@ cjc --import-path ../target/release/pdf_cj \
     ${PDF_LIBS_DIR}/libpdf_cj.reader.a \
     -l:libzlib4cj.so \
     -L../target/release/zlib4cj \
+    -L${HITLS_LIB} \
+    -lhitls_crypto -lhitls_bsl -lboundscheck \
     --link-options="--start-group ${PDF_LIBS_DIR}/libpdf_cj.base.a ${PDF_LIBS_DIR}/libpdf_cj.util.a ${PDF_LIBS_DIR}/libpdf_cj.codec.a ${PDF_LIBS_DIR}/libpdf_cj.text.a ${PDF_LIBS_DIR}/libpdf_cj.image.a ${PDF_LIBS_DIR}/libpdf_cj.table.a ${PDF_LIBS_DIR}/libpdf_cj.api.a ${PDF_LIBS_DIR}/libpdf_cj.core.a ${PDF_LIBS_DIR}/libpdf_cj.reader.a ${PDF_LIBS_DIR}/libpdf_cj.form.a ${PDF_LIBS_DIR}/libpdf_cj.security.a ${PDF_LIBS_DIR}/libpdf_cj.a --end-group" \
     -o "$EXAMPLE_NAME"
 
