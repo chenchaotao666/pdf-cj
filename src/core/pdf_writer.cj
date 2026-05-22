@@ -14,7 +14,7 @@ import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phras
 import pdf_cj.util.{Rectangle, PageSize, PdfException}
 import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
-import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser}
+import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser, Jp2Parser}
 import pdf_cj.form.{PdfAnnotation, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination}
 import pdf_cj.codec.FlateEncoder
 import pdf_cj.security.PdfEncryption
@@ -894,6 +894,21 @@ public class PdfWriter <: DocListener {
             case ImageType.Bmp =>
                 // BMP：转换为 RGB 数据
                 createBmpXObject(stream, rawData)
+            case ImageType.Jpeg2000 =>
+                // JPEG2000 使用 JPXDecode，直接嵌入原始数据
+                // ColorSpace 和 BitsPerComponent 可选（JPEG2000 流内含），但显式写出
+                let jp2cs = match (Jp2Parser.parse(rawData)) {
+                    case Some(info) => info.colorSpace
+                    case None => "DeviceRGB"
+                }
+                let jp2bpc = match (Jp2Parser.parse(rawData)) {
+                    case Some(info) => info.bitsPerComponent
+                    case None => Int32(8)
+                }
+                stream.put(PdfName.FILTER, PdfName.JPXDECODE)
+                stream.put(PdfName.COLORSPACE, PdfName(jp2cs))
+                stream.put(PdfName("BitsPerComponent"), PdfNumber(jp2bpc))
+                stream.setContent(rawData)
             case _ =>
                 // 默认处理：尝试作为RGB数据
                 stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))

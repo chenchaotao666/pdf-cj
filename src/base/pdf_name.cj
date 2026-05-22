@@ -122,6 +122,7 @@ public class PdfName <: PdfObjectBase {
     public static let ASCII85DECODE = PdfName("ASCII85Decode")
     public static let LZWDECODE = PdfName("LZWDecode")
     public static let DCTDECODE = PdfName("DCTDecode")
+    public static let JPXDECODE = PdfName("JPXDecode")
 
     // 图片相关
     public static let XOBJECT = PdfName("XObject")

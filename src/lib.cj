@@ -36,7 +36,7 @@ public import pdf_cj.table.{
 
 // 导出图片模块
 public import pdf_cj.image.{
-    Image, ImageType
+    Image, ImageType, Jp2Parser, Jp2Info
 }
 
 // 导出编解码模块

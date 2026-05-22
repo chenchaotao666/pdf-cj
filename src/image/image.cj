@@ -19,6 +19,7 @@ public enum ImageType {
     | Gif
     | Bmp
     | Tiff
+    | Jpeg2000
 
     /**
      * 转换为整数
@@ -31,6 +32,7 @@ public enum ImageType {
             case Gif => 3
             case Bmp => 4
             case Tiff => 5
+            case Jpeg2000 => 6
         }
     }
 }
@@ -170,6 +172,22 @@ public class Image <: Element {
             return
         }
 
+        // JP2 容器: 00 00 00 0C 6A 50 20 20
+        if (data.size >= 8 &&
+            data[0] == UInt8(0x00) && data[1] == UInt8(0x00) &&
+            data[2] == UInt8(0x00) && data[3] == UInt8(0x0C) &&
+            data[4] == UInt8(0x6A) && data[5] == UInt8(0x50)) {
+            _imageType = ImageType.Jpeg2000
+            return
+        }
+
+        // J2K 裸码流: FF 4F FF 51
+        if (data[0] == UInt8(0xFF) && data[1] == UInt8(0x4F) &&
+            data[2] == UInt8(0xFF) && data[3] == UInt8(0x51)) {
+            _imageType = ImageType.Jpeg2000
+            return
+        }
+
         _imageType = ImageType.Unknown
     }
 
@@ -186,6 +204,8 @@ public class Image <: Element {
                 parseGifData(data)
             case ImageType.Bmp =>
                 parseBmpData(data)
+            case ImageType.Jpeg2000 =>
+                parseJp2Data(data)
             case _ =>
                 // 默认尺寸
                 this._width = 100.0
@@ -270,6 +290,20 @@ public class Image <: Element {
         // 如果没找到，使用默认值
         this._width = 100.0
         this._height = 100.0
+    }
+
+    /**
+     * 解析JPEG2000图片数据
+     */
+    private func parseJp2Data(data: Array<UInt8>): Unit {
+        match (Jp2Parser.parse(data)) {
+            case Some(info) =>
+                this._width = Float32(info.width)
+                this._height = Float32(info.height)
+            case None =>
+                this._width = 100.0
+                this._height = 100.0
+        }
     }
 
     // ===== 缩放方法 =====
