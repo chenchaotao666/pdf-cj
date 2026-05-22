@@ -193,7 +193,20 @@ public class PdfStamper {
             xrefEntries.add((pageDictObjNum, pageOffset))
         }
 
-        // 4. 若有 moreInfo，写 Info 对象
+        // 4. 写修改后的 AcroFields 对象（增量更新字段字典）
+        match (acroFieldsInstance) {
+            case Some(af) =>
+                let dirtyFields = af.getDirtyFieldObjects()
+                for (i in 0..dirtyFields.size) {
+                    let (objNum, dict) = dirtyFields[i]
+                    let offset = outputStream.position
+                    PdfIndirectObject(objNum, dict).writeTo(outputStream)
+                    xrefEntries.add((objNum, offset))
+                }
+            case None => ()
+        }
+
+        // 5. 若有 moreInfo，写 Info 对象
         var infoObjNum: ?Int32 = None
         if (moreInfo.size > 0) {
             let objNum = allocateObjectNumber()
@@ -207,7 +220,7 @@ public class PdfStamper {
             infoObjNum = Some(objNum)
         }
 
-        // 5. 写 xref 段（每个对象单独一段）
+        // 6. 写 xref 段（每个对象单独一段）
         let xrefStart = outputStream.position
         for (i in 0..xrefEntries.size) {
             let (objNum, offset) = xrefEntries[i]
@@ -215,7 +228,7 @@ public class PdfStamper {
             outputStream.writeString(formatXRefEntry(offset, 0))
         }
 
-        // 6. 写 trailer
+        // 7. 写 trailer
         let prevXRef = reader.getStartXRefOffset()
         let rootObjNum = reader.getRootObjectNumber()
         let totalObjs = nextObjectNumber
@@ -228,7 +241,7 @@ public class PdfStamper {
         }
         outputStream.writeString(" >>\n")
 
-        // 7. startxref + %%EOF
+        // 8. startxref + %%EOF
         outputStream.writeString("startxref\n${xrefStart}\n%%EOF\n")
 
         reader.close()

@@ -553,6 +553,20 @@ public class PdfReader {
     public func getObject(ref: PdfIndirectReference): ?PdfObject {
         resolveRef(ref.objectNumber)
     }
+
+    /**
+     * 获取文档 Catalog 字典（用于 AcroForm 解析）
+     */
+    public func getCatalog(): ?PdfDictionary {
+        catalog
+    }
+
+    /**
+     * 根据对象号获取对象（供 AcroFields 内部使用）
+     */
+    public func getObjectByNumber(objNum: Int32): ?PdfObject {
+        resolveRef(objNum)
+    }
 }
 
 /**
