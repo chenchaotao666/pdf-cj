@@ -1,6 +1,13 @@
 /**
  * PDF-CJ 表单功能示例
- * 演示如何在 PDF 中添加可交互的表单字段（文本框、复选框、下拉框）。
+ * 演示如何在 PDF 中添加可交互的表单字段：
+ *   - 文本框（单行 / 多行）
+ *   - 下拉框
+ *   - 复选框
+ *   - 单选按钮组
+ *   - 按钮
+ * 每个字段均调用 generateAppearance() 生成 /AP 外观字典，
+ * 使 PDF 阅读器无需自行渲染字段外观。
  */
 package pdf_cj_examples
 
@@ -8,7 +15,7 @@ import pdf_cj.api.{Document, Paragraph}
 import pdf_cj.core.PdfWriter
 import pdf_cj.form.PdfFormFieldFactory
 import pdf_cj.text.{BaseFont, Font}
-import pdf_cj.util.PageSize
+import pdf_cj.util.{PageSize, Rectangle}
 import std.fs.{File, OpenMode, Path}
 
 let NOTO_CJK_PATH = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
@@ -27,39 +34,31 @@ func cjkFont(size: Float32): Font { Font(CJK_BASE, size) }
  */
 public func exampleCreateForm(): Unit {
     try {
-        println("\n示例：创建 PDF 交互表单...")
+        println("\n示例：创建 PDF 交互表单（含外观生成）...")
 
         let document = Document(PageSize.A4)
         let file = File(Path("output/example_forms_form.pdf"), OpenMode.Write)
         let writer = PdfWriter.getInstance(document, file)
         document.open()
 
-        let labelFont = cjkFont(12.0)     // 标签字体
+        let labelFont = cjkFont(12.0)
         let titleFont = cjkFont(16.0)
-        let GAP:   Float32 = 6.0          // 行间距（段落 leading≈9pt）
-        let FIELD_X: Float32 = 120.0      // 输入框起始 x（标签列约 90pt 宽）
+        let GAP:     Float32 = 6.0
+        let FIELD_X: Float32 = 120.0
 
-        // ── 标题区 ─────────────────────────────────────────────
+        // ── 标题 ───────────────────────────────────────────────
         document.add(Paragraph("PDF 交互表单示例", titleFont))
         document.add(Paragraph("请填写以下信息：", labelFont))
         document.add(Paragraph(" ", cjkFont(GAP)))
 
-        // ── 辅助函数：记录行顶 Y，添加标签，返回字段所需的 (y_bottom, field_height) ──
-        // 用法：
-        //   let y0 = writer.currentY          // 行基线（标签绘制处）
-        //   document.add(Paragraph(label, labelFont))
-        //   let fh = y0 - writer.currentY + 4.0  // 字段高度 = leading + 4
-        //   let fy = writer.currentY - 2.0        // 字段底边
-        //   writer.addFormField(createXxx(name, FIELD_X, fy, w, fh))
-        //   document.add(Paragraph(" ", cjkFont(GAP)))   // 行间距
-
-        // ── 姓名 ───────────────────────────────────────────────
+        // ── 姓名（文本框）─────────────────────────────────────
         var y0 = writer.currentY
         document.add(Paragraph("姓名：", labelFont))
         var fh = y0 - writer.currentY + 4.0
         var fy = writer.currentY - 2.0
         let nameField = PdfFormFieldFactory.createTextField("name", FIELD_X, fy, 220.0, fh)
         nameField.setValue("张三")
+        nameField.generateAppearance()
         writer.addFormField(nameField)
         document.add(Paragraph(" ", cjkFont(GAP)))
 
@@ -71,6 +70,7 @@ public func exampleCreateForm(): Unit {
         let cityField = PdfFormFieldFactory.createComboBox("city", FIELD_X, fy, 160.0, fh)
         cityField.addOptions(["北京", "上海", "深圳", "杭州", "成都"])
         cityField.setValue("上海")
+        cityField.generateAppearance()
         writer.addFormField(cityField)
         document.add(Paragraph(" ", cjkFont(GAP)))
 
@@ -81,6 +81,7 @@ public func exampleCreateForm(): Unit {
         fy = writer.currentY - 2.0
         let agreeField = PdfFormFieldFactory.createCheckBox("agree", FIELD_X, fy, fh)
         agreeField.setChecked(true)
+        agreeField.generateAppearance()
         writer.addFormField(agreeField)
         document.add(Paragraph(" ", cjkFont(GAP)))
 
@@ -91,23 +92,60 @@ public func exampleCreateForm(): Unit {
         fy = writer.currentY - 2.0
         let emailField = PdfFormFieldFactory.createTextField("email", FIELD_X, fy, 250.0, fh)
         emailField.setValue("zhangsan@example.com")
+        emailField.generateAppearance()
         writer.addFormField(emailField)
         document.add(Paragraph(" ", cjkFont(GAP)))
 
-        // ── 备注（多行文本框，标签在上，字段在下）───────────
+        // ── 备注（多行文本框）────────────────────────────────
         document.add(Paragraph("备注（多行）：", labelFont))
-        // 字段紧接在标签下方，高度为 4 行
         let NOTES_H: Float32 = 72.0
         fy = writer.currentY - 2.0
         let notesField = PdfFormFieldFactory.createTextField("notes", writer.marginLeft, fy - NOTES_H + fh, 400.0, NOTES_H)
         notesField.setMultiline(true)
         notesField.setValue("请在此输入备注信息...")
+        notesField.generateAppearance()
         writer.addFormField(notesField)
+        document.add(Paragraph(" ", cjkFont(NOTES_H)))
+        document.add(Paragraph(" ", cjkFont(GAP)))
+
+        // ── 性别（单选按钮组）────────────────────────────────
+        y0 = writer.currentY
+        document.add(Paragraph("性别：", labelFont))
+        fh = y0 - writer.currentY + 4.0
+        fy = writer.currentY - 2.0
+        let genderField = PdfFormFieldFactory.createRadioButtonGroup("gender")
+        // 两个 radio button 并排
+        let RB_SIZE: Float32 = fh
+        genderField.addOption("male",   Rectangle(FIELD_X,              fy, FIELD_X + RB_SIZE,              fy + RB_SIZE))
+        genderField.addOption("female", Rectangle(FIELD_X + RB_SIZE + 30.0, fy, FIELD_X + RB_SIZE * 2.0 + 30.0, fy + RB_SIZE))
+        genderField.selectOption("male")
+        genderField.generateAppearance()
+        writer.addFormField(genderField)
+        // 标签（男 / 女）用固定坐标 Paragraph 方式简化处理
+        document.add(Paragraph(" ", cjkFont(GAP)))
+
+        // ── 操作按钮（提交 / 重置）───────────────────────────
+        document.add(Paragraph("操作：", labelFont))
+        let BTN_Y = writer.currentY - 2.0
+        let BTN_H: Float32 = 20.0
+        let BTN_W: Float32 = 60.0
+
+        let submitBtn = PdfFormFieldFactory.createPushButton("submit", FIELD_X, BTN_Y, BTN_W, BTN_H, "Submit")
+        submitBtn.generateAppearance()
+        writer.addFormField(submitBtn)
+
+        let resetBtn = PdfFormFieldFactory.createPushButton("reset", FIELD_X + BTN_W + 10.0, BTN_Y, BTN_W, BTN_H, "Reset")
+        resetBtn.generateAppearance()
+        writer.addFormField(resetBtn)
 
         document.close()
         file.close()
 
-        println("  - 已添加文本字段 (name, email, notes)、下拉框 (city)、复选框 (agree)")
+        println("  - 文本字段 (name, email, notes)：含 /AP 外观")
+        println("  - 下拉框 (city)：含 /AP 外观")
+        println("  - 复选框 (agree)：含 /AP 外观，已勾选")
+        println("  - 单选按钮组 (gender)：male / female，默认选 male")
+        println("  - 按钮 (submit, reset)：含 /AP 外观（灰色背景 + 文字）")
         println("✓ 成功创建: output/example_forms_form.pdf")
     } catch (e: Exception) {
         println("✗ 错误: ${e.message}")
@@ -124,6 +162,6 @@ main(): Int64 {
 
     println("\n=== 验证完成 ===")
     println("请检查 output/ 目录中的 PDF 文件")
-    println("  example_forms_form.pdf - 文本框、下拉框、复选框")
+    println("  example_forms_form.pdf - 文本框、下拉框、复选框、单选按钮、按钮")
     0
 }
