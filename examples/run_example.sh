@@ -52,11 +52,12 @@ cjc --import-path ../target/release/pdf_cj \
     ${PDF_LIBS_DIR}/libpdf_cj.form.a \
     ${PDF_LIBS_DIR}/libpdf_cj.security.a \
     ${PDF_LIBS_DIR}/libpdf_cj.reader.a \
+    ${PDF_LIBS_DIR}/libpdf_cj.barcode.a \
     -l:libzlib4cj.so \
     -L../target/release/zlib4cj \
     -L${HITLS_LIB} \
     -lhitls_crypto -lhitls_bsl -lboundscheck \
-    --link-options="--start-group ${PDF_LIBS_DIR}/libpdf_cj.base.a ${PDF_LIBS_DIR}/libpdf_cj.util.a ${PDF_LIBS_DIR}/libpdf_cj.codec.a ${PDF_LIBS_DIR}/libpdf_cj.text.a ${PDF_LIBS_DIR}/libpdf_cj.image.a ${PDF_LIBS_DIR}/libpdf_cj.table.a ${PDF_LIBS_DIR}/libpdf_cj.api.a ${PDF_LIBS_DIR}/libpdf_cj.core.a ${PDF_LIBS_DIR}/libpdf_cj.reader.a ${PDF_LIBS_DIR}/libpdf_cj.form.a ${PDF_LIBS_DIR}/libpdf_cj.security.a ${PDF_LIBS_DIR}/libpdf_cj.a --end-group" \
+    --link-options="--start-group ${PDF_LIBS_DIR}/libpdf_cj.base.a ${PDF_LIBS_DIR}/libpdf_cj.util.a ${PDF_LIBS_DIR}/libpdf_cj.codec.a ${PDF_LIBS_DIR}/libpdf_cj.text.a ${PDF_LIBS_DIR}/libpdf_cj.image.a ${PDF_LIBS_DIR}/libpdf_cj.table.a ${PDF_LIBS_DIR}/libpdf_cj.api.a ${PDF_LIBS_DIR}/libpdf_cj.core.a ${PDF_LIBS_DIR}/libpdf_cj.reader.a ${PDF_LIBS_DIR}/libpdf_cj.form.a ${PDF_LIBS_DIR}/libpdf_cj.security.a ${PDF_LIBS_DIR}/libpdf_cj.barcode.a ${PDF_LIBS_DIR}/libpdf_cj.a --end-group" \
     -o "$EXAMPLE_NAME"
 
 if [ $? -eq 0 ]; then

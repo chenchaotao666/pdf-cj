@@ -71,3 +71,9 @@ public import pdf_cj.base.{
 public import pdf_cj.reader.{
     TextFragment, ContentStreamParser, TextExtractor
 }
+
+// 导出条形码模块
+public import pdf_cj.barcode.{
+    Barcode128, BarcodeEAN, Barcode39,
+    BarcodeQRCode, BarcodePDF417
+}
