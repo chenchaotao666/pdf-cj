@@ -2006,6 +2006,38 @@ public class PdfWriter <: DocListener {
     public prop marginLeft: Float32 {
         get() { _marginLeft }
     }
+
+    // ── 透明度与渐变 API ────────────────────────────────────────────────────
+
+    /**
+     * 注册扩展图形状态（透明度/混合模式）
+     * @return ExtGState 资源名称，供 cb.setExtGState(name) 使用
+     */
+    public func addGState(gstate: PdfGState): String {
+        let dict = gstate.toDictionary()
+        let ref = _body.add(dict)
+        _resources.addExtGState(ref)
+    }
+
+    /**
+     * 注册渐变填充图案（ShadingPattern）
+     * @return Pattern 资源名称，供 cb.setColorFillPattern(name) 使用
+     */
+    public func addShadingPattern(pattern: PdfShadingPattern): String {
+        let dict = pattern.toDictionary()
+        let ref = _body.add(dict)
+        _resources.addPattern(ref)
+    }
+
+    /**
+     * 注册渐变对象供 sh 操作符直接使用
+     * @return Shading 资源名称，供 cb.paintShading(name) 使用
+     */
+    public func addShading(shading: PdfShading): String {
+        let dict = shading.toDictionary()
+        let ref = _body.add(dict)
+        _resources.addShading(ref)
+    }
 }
 
 /**

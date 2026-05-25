@@ -77,3 +77,10 @@ public import pdf_cj.barcode.{
     Barcode128, BarcodeEAN, Barcode39,
     BarcodeQRCode, BarcodePDF417
 }
+
+// 导出透明度与渐变模块
+public import pdf_cj.core.{
+    PdfGState, BlendMode,
+    PdfShading, PdfAxialShading, PdfRadialShading,
+    PdfShadingPattern
+}

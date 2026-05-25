@@ -808,6 +808,54 @@ public class PdfContentByte {
         appendNewLine()
     }
 
+    /**
+     * 应用扩展图形状态（透明度、混合模式等）
+     * 输出：/GS1 gs
+     */
+    public func setExtGState(name: String): Unit {
+        appendString("/")
+        appendString(name)
+        appendString(" gs")
+        appendNewLine()
+    }
+
+    /**
+     * 将填充颜色空间切换为 Pattern 并设置图案
+     * 输出：/Pattern cs  /Pn scn
+     */
+    public func setColorFillPattern(name: String): Unit {
+        appendString("/Pattern cs")
+        appendNewLine()
+        appendString("/")
+        appendString(name)
+        appendString(" scn")
+        appendNewLine()
+    }
+
+    /**
+     * 将描边颜色空间切换为 Pattern 并设置图案
+     * 输出：/Pattern CS  /Pn SCN
+     */
+    public func setColorStrokePattern(name: String): Unit {
+        appendString("/Pattern CS")
+        appendNewLine()
+        appendString("/")
+        appendString(name)
+        appendString(" SCN")
+        appendNewLine()
+    }
+
+    /**
+     * 直接绘制渐变（sh 操作符），渐变填满当前裁剪区域
+     * 输出：/Sh1 sh
+     */
+    public func paintShading(name: String): Unit {
+        appendString("/")
+        appendString(name)
+        appendString(" sh")
+        appendNewLine()
+    }
+
     // ===== 输出 =====
 
     /**

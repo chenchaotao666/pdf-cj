@@ -107,6 +107,21 @@ public class PdfName <: PdfObjectBase {
     public static let EXTGSTATE = PdfName("ExtGState")
     public static let CA = PdfName("CA")
     public static let ca = PdfName("ca")
+    public static let BM = PdfName("BM")
+
+    // 渐变与图案
+    public static let PATTERN = PdfName("Pattern")
+    public static let SHADING = PdfName("Shading")
+    public static let PATTERNTYPE = PdfName("PatternType")
+    public static let SHADINGTYPE = PdfName("ShadingType")
+    public static let COORDS = PdfName("Coords")
+    public static let DOMAIN = PdfName("Domain")
+    public static let FUNCTION = PdfName("Function")
+    public static let FUNCTIONTYPE = PdfName("FunctionType")
+    public static let EXTEND = PdfName("Extend")
+    public static let MATRIX = PdfName("Matrix")
+    public static let C0 = PdfName("C0")
+    public static let C1 = PdfName("C1")
 
     // 颜色空间
     public static let COLORSPACE = PdfName("ColorSpace")

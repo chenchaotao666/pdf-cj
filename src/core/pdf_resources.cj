@@ -40,6 +40,14 @@ public class PdfResources {
     private var extGStateNames: ArrayList<String> = ArrayList<String>()
     private var extGStateCounter: Int32 = 0
 
+    private var patterns: HashMap<String, PdfIndirectReference> = HashMap<String, PdfIndirectReference>()
+    private var patternNames: ArrayList<String> = ArrayList<String>()
+    private var patternCounter: Int32 = 0
+
+    private var shadings: HashMap<String, PdfIndirectReference> = HashMap<String, PdfIndirectReference>()
+    private var shadingNames: ArrayList<String> = ArrayList<String>()
+    private var shadingCounter: Int32 = 0
+
     public init() {}
 
     /**
@@ -88,13 +96,37 @@ public class PdfResources {
 
     /**
      * 添加扩展图形状态
-     * @return ExtGState 名称
+     * @return ExtGState 名称（如 GS1）
      */
     public func addExtGState(reference: PdfIndirectReference): String {
         extGStateCounter += 1
         let name = "GS" + extGStateCounter.toString()
         extGStates[name] = reference
         extGStateNames.add(name)
+        name
+    }
+
+    /**
+     * 添加 Pattern 资源（渐变图案等）
+     * @return Pattern 名称（如 P1）
+     */
+    public func addPattern(reference: PdfIndirectReference): String {
+        patternCounter += 1
+        let name = "P" + patternCounter.toString()
+        patterns[name] = reference
+        patternNames.add(name)
+        name
+    }
+
+    /**
+     * 添加 Shading 资源（供 sh 操作符直接使用）
+     * @return Shading 名称（如 Sh1）
+     */
+    public func addShading(reference: PdfIndirectReference): String {
+        shadingCounter += 1
+        let name = "Sh" + shadingCounter.toString()
+        shadings[name] = reference
+        shadingNames.add(name)
         name
     }
 
@@ -140,6 +172,30 @@ public class PdfResources {
             dict.put(PdfName.EXTGSTATE, gsDict)
         }
 
+        // Pattern 资源
+        if (!patternNames.isEmpty()) {
+            let patDict = PdfDictionary()
+            for (name in patternNames) {
+                match (patterns.get(name)) {
+                    case Some(reference) => patDict.put(PdfName(name), reference)
+                    case None => ()
+                }
+            }
+            dict.put(PdfName.PATTERN, patDict)
+        }
+
+        // Shading 资源
+        if (!shadingNames.isEmpty()) {
+            let shDict = PdfDictionary()
+            for (name in shadingNames) {
+                match (shadings.get(name)) {
+                    case Some(reference) => shDict.put(PdfName(name), reference)
+                    case None => ()
+                }
+            }
+            dict.put(PdfName.SHADING, shDict)
+        }
+
         // ProcSet
         let procSet = PdfArray()
         procSet.add(PdfName.PDF)
@@ -156,7 +212,8 @@ public class PdfResources {
      * 检查是否有资源
      */
     public func hasResources(): Bool {
-        !fontNames.isEmpty() || !xObjectNames.isEmpty() || !extGStateNames.isEmpty()
+        !fontNames.isEmpty() || !xObjectNames.isEmpty() || !extGStateNames.isEmpty() ||
+        !patternNames.isEmpty() || !shadingNames.isEmpty()
     }
 
     /**
@@ -186,6 +243,22 @@ public class PdfResources {
                 case None => ()
             }
         }
+
+        // 合并 Pattern
+        for (name in other.patternNames) {
+            match (other.patterns.get(name)) {
+                case Some(reference) => mergePattern(name, reference)
+                case None => ()
+            }
+        }
+
+        // 合并 Shading
+        for (name in other.shadingNames) {
+            match (other.shadings.get(name)) {
+                case Some(reference) => mergeShading(name, reference)
+                case None => ()
+            }
+        }
     }
 
     private func mergeFontResource(key: String, resource: FontResource): Unit {
@@ -206,6 +279,20 @@ public class PdfResources {
         if (!extGStates.contains(name)) {
             extGStates[name] = reference
             extGStateNames.add(name)
+        }
+    }
+
+    private func mergePattern(name: String, reference: PdfIndirectReference): Unit {
+        if (!patterns.contains(name)) {
+            patterns[name] = reference
+            patternNames.add(name)
+        }
+    }
+
+    private func mergeShading(name: String, reference: PdfIndirectReference): Unit {
+        if (!shadings.contains(name)) {
+            shadings[name] = reference
+            shadingNames.add(name)
         }
     }
 }
