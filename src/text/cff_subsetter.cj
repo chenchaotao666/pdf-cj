@@ -50,9 +50,10 @@ public class CFFSubsetter {
         let topDictLen    = getIndexItemLength(cff, topDictIdxPos, 0)
         if (topDictOffset < 0 || topDictLen <= 0) { return cff }
 
-        // === 2. 从 TopDict 解析 CharStrings 偏移和 FDArray 偏移 ===
+        // === 2. 从 TopDict 解析 CharStrings 偏移、FDArray 偏移、FDSelect 偏移 ===
         let charstringsOff = findDictInt(cff, topDictOffset, topDictLen, 17i32, -1i32)
         let fdArrayOff     = findDictInt(cff, topDictOffset, topDictLen, 12i32, 36i32)
+        let fdSelectOff    = findDictInt(cff, topDictOffset, topDictLen, 12i32, 37i32)
         if (charstringsOff < 0) { return cff }
 
         // === 3. 读取 CharStrings INDEX 元数据 ===
@@ -64,11 +65,15 @@ public class CFFSubsetter {
         let delta = (csEnd - charstringsOff) - Int64(newCS.size)
         if (delta <= 0) { return cff }  // 没有实质缩减，不值得处理
 
-        // === 5. 复制 part1（CharStrings 之前），更新 TopDict FDArray 偏移 ===
+        // === 5. 复制 part1（CharStrings 之前），更新 TopDict FDArray 和 FDSelect 偏移 ===
         let part1 = copyRange(cff, 0, charstringsOff)
         if (fdArrayOff >= 0) {
             let newFDArrayOff = fdArrayOff - delta
             updateDictInt32(part1, topDictOffset, topDictLen, 12i32, 36i32, newFDArrayOff)
+        }
+        if (fdSelectOff >= 0) {
+            let newFDSelectOff = fdSelectOff - delta
+            updateDictInt32(part1, topDictOffset, topDictLen, 12i32, 37i32, newFDSelectOff)
         }
 
         // === 6. 复制 part3（CharStrings 之后 = FDArray+Private+LocalSubrs），更新 Private 偏移 ===
@@ -93,12 +98,20 @@ public class CFFSubsetter {
 
     private func buildNewCharstrings(csOff: Int64, csEnd: Int64): Array<UInt8> {
         // 读取原始 INDEX 元数据
-        let count = Int64(readUInt16(csOff))
-        if (count == 0) { return buildEmptyIndex() }
+        let originalCount = Int64(readUInt16(csOff))
+        if (originalCount == 0) { return buildEmptyIndex() }
         let offsize = Int64(cff[csOff + 2])
         if (offsize < 1 || offsize > 4) { return buildEmptyIndex() }
+
+        // 将 count 裁剪到 maxUsedGlyph+1，避免保留大量空白尾部槽位
+        var maxGlyph: Int64 = 0
+        for ((gid, _) in usedGlyphs) {
+            if (Int64(gid) > maxGlyph) { maxGlyph = Int64(gid) }
+        }
+        let count = if (maxGlyph + 1 < originalCount) { maxGlyph + 1 } else { originalCount }
+
         let offsetsStart = csOff + 3
-        let dataStart = offsetsStart + (count + 1) * offsize
+        let dataStart = offsetsStart + (originalCount + 1) * offsize
 
         // 收集每个字形的 charstring 数据
         var pieces = ArrayList<Array<UInt8>>()

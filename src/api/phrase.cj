@@ -21,10 +21,11 @@ public open class Phrase <: Element {
 
     /**
      * 创建空的 Phrase
+     * 与 OpenPDF 一致：Phrase() 默认行距为 16（不依赖字号）
      */
     public init() {
         this._font = Font.DEFAULT
-        this._leading = Font.DEFAULTSIZE * DEFAULT_LEADING_MULTIPLIER
+        this._leading = 16.0
     }
 
     /**

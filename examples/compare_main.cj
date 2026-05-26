@@ -14,7 +14,7 @@
  *  5  | Color(r, g, b)  pdf_cj.text.Color       | new Color(r,g,b)  java.awt.Color
  *  6  | Float32 参数（所有尺寸/坐标）              | float / int 参数
  *  7  | Font(bf, 12.0, FontStyle.Bold)          | new Font(bf, 12, Font.BOLD, color)（支持内联color）
- *  8  | ✗ Chunk 无下划线/删除线装饰              | chunk.setUnderline(0.5f, -2f)
+ *  8  | chunk.setUnderline() / setStrikethrough() / setBackground(Color) | chunk.setUnderline(0.5f, -2f)
  *  9  | Paragraph("") 或 setSpacingAfter        | Chunk.NEWLINE
  * 10  | 必须定义命名类 <: PdfPageEventHelper     | 匿名内部类实现 PageEventHelper
  * 11  | 全部 unchecked exception                 | checked exception: DocumentException
@@ -107,17 +107,19 @@ func section1_text(): Unit {
             "两端对齐排版，行距 20pt，首行缩进 24pt。", cjk(12.0))
         // Java:    Element.ALIGN_JUSTIFIED
         // Cangjie: Alignment.Left（pdf-cj 当前未实现 Justified 对齐）
-        body.setAlignment(Alignment.Left)
-        // Java: p.setLeading(20)     -- Paragraph 直接有 setLeading
-        // Cangjie: setMultipliedLeading(1.5f) 或 setLeading 不存在
-        body.setMultipliedLeading(1.5)
+        // Java:    Element.ALIGN_JUSTIFIED
+        // Cangjie: Alignment.Justified（现已支持两端对齐）
+        body.setAlignment(Alignment.Justified)
+        // Java: p.setLeading(20)
+        // Cangjie: setLeading(20.0)（现已支持固定行距）
+        body.setLeading(20.0)
         body.setFirstLineIndent(24.0)
         body.setSpacingAfter(10.0)
         doc.add(body)
 
-        // ── Chunk 样式（Java 支持丰富，pdf-cj 仅支持颜色） ───────────────────
-        // ★ pdf-cj Chunk 仅有 setColor(Color) — 无下划线/删除线/背景高亮
-        // ★ Java Chunk 支持: setUnderline / setStrikethrough / setBackground / setTextRise
+        // ── Chunk 样式（颜色、下划线、删除线、背景高亮） ────────────────────
+        // pdf-cj: Chunk.setColor / setUnderline / setStrikethrough / setBackground
+        // Java:   chunk.setUnderline(thickness, yPos) / setBackground(color)
         let normalChunk = Chunk("默认  ", cjk(12.0))
         let boldChunk   = Chunk("粗体  ", cjkBold(12.0))
 
@@ -128,41 +130,55 @@ func section1_text(): Unit {
         // cangjie: chunk.setColor(...)
         coloredChunk.setColor(Color(200, 0, 0))
 
-        // ★ 注意：pdf-cj 没有 setUnderline / setStrikethrough，此处只能用颜色区分
-        let noUnderlineChunk = Chunk("[无下划线API]  ", cjk(12.0))
-        noUnderlineChunk.setColor(Color(100, 100, 200))
+        // 下划线（与 Java 一致：默认黑色，线条颜色继承文字颜色）
+        // java: chunk.setUnderline(0.6f, -2f)
+        // cangjie: chunk.setUnderline()
+        let underlineChunk = Chunk("下划线  ", cjk(12.0))
+        _ = underlineChunk.setUnderline()
 
-        let noStrikeChunk = Chunk("[无删除线API]", cjk(12.0))
-        noStrikeChunk.setColor(Color(150, 150, 150))
+        // 删除线（与 Java 一致：默认黑色）
+        // java: strike.setUnderline(0.6f, 4f)  // 用正 y 值模拟删除线
+        // cangjie: chunk.setStrikethrough()
+        let strikeChunk = Chunk("删除线  ", cjk(12.0))
+        _ = strikeChunk.setStrikethrough()
+
+        // 背景高亮
+        // java: chunk.setBackground(new Color(255, 255, 0))
+        // cangjie: chunk.setBackground(Color(255, 255, 0))
+        let bgChunk = Chunk("背景高亮", cjk(12.0))
+        _ = bgChunk.setBackground(Color(255, 255, 0))
 
         let phrase = Phrase()
         phrase.add(normalChunk)
         phrase.add(boldChunk)
         phrase.add(coloredChunk)
-        phrase.add(noUnderlineChunk)
-        phrase.add(noStrikeChunk)
+        phrase.add(underlineChunk)
+        phrase.add(strikeChunk)
+        phrase.add(bgChunk)
         doc.add(Paragraph(phrase))
 
         // ── Chunk.NEWLINE 等价物 ───────────────────────────────────────────
-        // Java:    doc.add(Chunk.NEWLINE)   -- 专用换行符 Chunk
-        // Cangjie: doc.add(Paragraph(""))   -- 空段落（最简单方式）
-        doc.add(Paragraph(""))
-        doc.add(Paragraph(""))
+        // Java:    doc.add(Chunk.NEWLINE)
+        // Cangjie: doc.add(Chunk.NEWLINE)  ← 完全相同！
+        doc.add(Chunk.NEWLINE)
+        doc.add(Chunk.NEWLINE)
 
         // ── 字体大小对比 ──────────────────────────────────────────────────────
         doc.add(Paragraph("字体大小对比：", cjkBold(12.0)))
         // 数组字面量 [8.0, ...] 推断为 Float64，需显式转 Float32 传给 cjk()
         for (size in [8.0, 10.0, 12.0, 14.0, 18.0, 24.0]) {
             let s = Float32(size)
-            doc.add(Paragraph("${s}pt: 中文示例 ABC 123", cjk(s)))
+            doc.add(Paragraph("${Int32(size)}pt: 中文示例 ABC 123", cjk(s)))
         }
 
         // ── 行距控制 ──────────────────────────────────────────────────────────
+        // Java: leadingDemo.setLeading(28)
+        // Cangjie: setLeading(28.0)（固定行距）
         let leadingDemo = Paragraph(
-            "自定义行距（multiplied 1.8）：这段文字使用了更宽松的行距，" +
+            "自定义行距（leading=28）：这段文字使用了更宽松的行距，" +
             "改善长文本的阅读体验。段落延续三行以上才能明显看出效果。" +
             "第二句，第三句。", cjk(12.0))
-        leadingDemo.setMultipliedLeading(1.8)
+        leadingDemo.setLeading(28.0)
         leadingDemo.setSpacingBefore(6.0)
         leadingDemo.setSpacingAfter(12.0)
         doc.add(leadingDemo)

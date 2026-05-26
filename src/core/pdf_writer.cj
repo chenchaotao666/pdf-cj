@@ -94,6 +94,14 @@ public class PdfWriter <: DocListener {
     // 加密
     private var _encryption: ?PdfEncryption = None
 
+    // 两端对齐渲染时当前行的词间距（TJ kern 方式，因为 Tw 对 CID 字体无效）
+    private var _justifyWordSpacing: Float32 = 0.0
+    // 上一行生效的两端对齐参数（用于最后短行复用，与 OpenPDF 行为一致）
+    private var _prevJustifyTc: Float32 = 0.0
+    private var _prevJustifyTw: Float32 = 0.0
+    // 上一段落使用的 leading（用于空段落行高，与 OpenPDF 行为一致）
+    private var _lastLeading: Float32 = 0.0
+
     // PDF 版本
     public static let PDF_VERSION_1_4 = "1.4"
     public static let PDF_VERSION_1_5 = "1.5"
@@ -683,6 +691,10 @@ public class PdfWriter <: DocListener {
     }
 
     private func processParagraph(para: Paragraph): Bool {
+        // 重置两端对齐的跨行复用参数（每个新段落独立计算）
+        _prevJustifyTc = 0.0
+        _prevJustifyTw = 0.0
+
         // 段前间距
         _currentY -= para.spacingBefore
 
@@ -699,65 +711,172 @@ public class PdfWriter <: DocListener {
         let firstLineLeftX = leftX + para.firstLineIndent
         let rightX = _pageSize.width - _marginRight - para.indentationRight
 
-        // currentX 追踪当前行的绘制起点
-        var currentX: Float32 = firstLineLeftX
+        // ── Pass 1: 构建所有行，每行是一个 Chunk 列表 ──
+        let allLines = ArrayList<ArrayList<Chunk>>()
+        var currentLine = ArrayList<Chunk>()
+        var lineWidth: Float32 = 0.0
         var isFirstLine = true
 
         for (chunk in para.getChunks()) {
             let font = chunk.font
             let baseFont = font.getCalculatedBaseFont()
-
-            // 逐字符（Rune）遍历，按可用宽度自动换行
-            var lineText = ""
-            var lineWidth: Float32 = 0.0
+            var segText = ""
+            var segWidth: Float32 = 0.0
 
             for (r in chunk.content.runes()) {
                 let charStr = String([r])
                 let charWidth = baseFont.getWidthPoint(charStr, font.size)
-                let lineStart: Float32 = if (isFirstLine) { firstLineLeftX } else { leftX }
+                let availWidth: Float32 = if (isFirstLine) {
+                    rightX - firstLineLeftX
+                } else {
+                    rightX - leftX
+                }
 
-                // 当前行已有内容且加上此字符会超出右边界：换行
-                if (currentX + lineWidth + charWidth > rightX &&
-                    (!lineText.isEmpty() || currentX > lineStart)) {
-                    if (!lineText.isEmpty()) {
-                        let lineChunk = Chunk(lineText, font)
+                if (lineWidth + segWidth + charWidth > availWidth && lineWidth + segWidth > 0.0) {
+                    // 当前段落片段非空，加入本行
+                    if (!segText.isEmpty()) {
+                        let seg = Chunk(segText, font)
                         match (chunk.color) {
-                            case Some(c) => _ = lineChunk.setColor(c)
+                            case Some(c) => _ = seg.setColor(c)
                             case None => ()
                         }
-                        drawChunk(lineChunk, currentX, _currentY, para.alignment)
+                        if (chunk.underline) { _ = seg.setUnderline() }
+                        if (chunk.strikethrough) { _ = seg.setStrikethrough() }
+                        match (chunk.background) {
+                            case Some(bg) => _ = seg.setBackground(bg)
+                            case None => ()
+                        }
+                        currentLine.add(seg)
                     }
-                    _currentY -= para.leading
-                    if (_currentY < _marginBottom) {
-                        newPage()
-                    }
-                    currentX = leftX
+                    // 保存本行，开启新行
+                    allLines.add(currentLine)
+                    currentLine = ArrayList<Chunk>()
+                    lineWidth = 0.0
                     isFirstLine = false
-                    lineText = charStr
-                    lineWidth = charWidth
+                    segText = charStr
+                    segWidth = charWidth
                 } else {
-                    lineText += charStr
-                    lineWidth += charWidth
+                    segText += charStr
+                    segWidth += charWidth
                 }
             }
 
-            // 绘制本 chunk 剩余内容
-            if (!lineText.isEmpty()) {
-                let lineChunk = Chunk(lineText, font)
+            // chunk 遍历完，将剩余段落片段加入当前行
+            if (!segText.isEmpty()) {
+                let seg = Chunk(segText, font)
                 match (chunk.color) {
-                    case Some(c) => _ = lineChunk.setColor(c)
+                    case Some(c) => _ = seg.setColor(c)
                     case None => ()
                 }
-                drawChunk(lineChunk, currentX, _currentY, para.alignment)
-                currentX += lineWidth
+                if (chunk.underline) { _ = seg.setUnderline() }
+                if (chunk.strikethrough) { _ = seg.setStrikethrough() }
+                match (chunk.background) {
+                    case Some(bg) => _ = seg.setBackground(bg)
+                    case None => ()
+                }
+                currentLine.add(seg)
+                lineWidth += segWidth
             }
         }
 
-        // 最后一行结束后下移一行
-        _currentY -= para.leading
+        // 最后一行（若非空）
+        if (!currentLine.isEmpty()) {
+            allLines.add(currentLine)
+        }
+
+        // 空段落：没有任何行，仍需下移一行高度
+        // 与 OpenPDF 一致：空段落复用上一段落的 leading，而不是自身默认 leading
+        if (allLines.isEmpty()) {
+            let effectiveLeading = if (_lastLeading > 0.0) { _lastLeading } else { para.leading }
+            _currentY -= effectiveLeading
+            _currentY -= para.spacingAfter
+            fireOnParagraphEnd(_currentY)
+            return true
+        }
+
+        // ── Pass 2: 渲染每行，按对齐方式计算 x 起点 ──
+        // 与 OpenPDF 对齐：先减 leading（下移一行高度），再绘制 baseline
+        for (i in 0..allLines.size) {
+            _currentY -= para.leading
+            if (_currentY < _marginBottom) {
+                newPage()
+            }
+
+            let line = allLines[i]
+            let lineLeftX: Float32 = if (i == 0) { firstLineLeftX } else { leftX }
+
+            // 计算本行总宽度
+            var totalWidth: Float32 = 0.0
+            for (seg in line) {
+                totalWidth += seg.getWidthPoint()
+            }
+
+            // 根据对齐计算起始 x
+            let startX: Float32 = match (para.alignment) {
+                case Alignment.Center => lineLeftX + (rightX - lineLeftX - totalWidth) / 2.0
+                case Alignment.Right => rightX - totalWidth
+                case _ => lineLeftX
+            }
+
+            // 两端对齐：计算 Tc（字符间距）和词间距（TJ kern）
+            // 与 OpenPDF 行为一致：对满行按公式计算，对明显偏短的最后一行复用上一行的 Tc/Tw
+            // 公式：ratio=2.5, baseFactor=extraSpace/(ratio*spaces+chars-1)
+            var appliedTc: Float32 = 0.0
+            var appliedTw: Float32 = 0.0
+            let isJustified = match (para.alignment) { case Alignment.Justified => true; case _ => false }
+            if (isJustified) {
+                let lineWidth = rightX - lineLeftX
+                let extraSpace = lineWidth - totalWidth
+                var charCount: Int32 = 0
+                var spaceCount: Int32 = 0
+                for (seg in line) {
+                    for (r in seg.content.runes()) {
+                        charCount += 1
+                        if (r == r' ') { spaceCount += 1 }
+                    }
+                }
+                // 行是否充分填满（extraSpace < 15% lineWidth）
+                let isFull = lineWidth > 0.0 && extraSpace > 0.0 && (extraSpace / lineWidth) < 0.15
+                if (charCount > 1 && isFull) {
+                    // 满行：按本行 extraSpace 计算 Tc/Tw
+                    let ratio: Float32 = 2.5
+                    let baseFactor = extraSpace / (ratio * Float32(spaceCount) + Float32(charCount) - 1.0)
+                    appliedTc = baseFactor
+                    appliedTw = ratio * baseFactor
+                } else if (charCount > 1 && _prevJustifyTc > 0.0) {
+                    // 明显偏短的最后一行：与 OpenPDF 一致，复用上一行的 Tc/Tw
+                    appliedTc = _prevJustifyTc
+                    appliedTw = _prevJustifyTw
+                }
+                if (appliedTc > 0.0) {
+                    // Tc 有效；Tw 对 CID 字体无效（空格 GID ≠ 0x20），词间距改由 drawChunk 内 TJ kern 实现
+                    getContent().setCharacterSpacing(appliedTc)
+                    _justifyWordSpacing = appliedTw
+                }
+            }
+
+            // 逐 chunk 渲染
+            var cx = startX
+            for (seg in line) {
+                drawChunk(seg, cx, _currentY, para.alignment)
+                cx += seg.getWidthPoint()
+            }
+
+            // 重置字符间距（词间距通过 _justifyWordSpacing 在 drawChunk 内处理）
+            if (appliedTc != 0.0 || appliedTw != 0.0) {
+                getContent().setCharacterSpacing(0.0)
+                _justifyWordSpacing = 0.0
+                // 保存本行参数供下一行（最后短行）复用
+                _prevJustifyTc = appliedTc
+                _prevJustifyTw = appliedTw
+            }
+        }
 
         // 段后间距
         _currentY -= para.spacingAfter
+
+        // 记录本段落 leading，供后续空段落复用（与 OpenPDF 行为一致）
+        _lastLeading = para.leading
 
         // 通知段落结束
         fireOnParagraphEnd(_currentY)
@@ -795,7 +914,12 @@ public class PdfWriter <: DocListener {
     }
 
     private func processChunk(chunk: Chunk): Bool {
-        drawChunk(chunk, _marginLeft, _currentY, Alignment.Left)
+        if (chunk.content == "\n") {
+            // Chunk.NEWLINE: 与 OpenPDF 一致，相当于 16pt 行距的空行
+            processParagraph(Paragraph(16.0))
+        } else {
+            drawChunk(chunk, _marginLeft, _currentY, Alignment.Left)
+        }
         true
     }
 
@@ -1395,17 +1519,17 @@ public class PdfWriter <: DocListener {
      * 在单元格中绘制段落
      */
     private func drawParagraphInCell(para: Paragraph, x: Float32, y: Float32): Float32 {
-        let newY = y - para.leading
+        // 与 OpenPDF 一致：先下移 spacingBefore，再下移 leading 到 baseline，最后返回 baseline - spacingAfter
+        let newY = y - para.spacingBefore - para.leading
         let paraChunks = para.getChunks()
         var idx: Int64 = 0
         var currentX = x
         while (idx < paraChunks.size) {
             drawChunk(paraChunks[idx], currentX, newY, para.alignment)
-            // 累加 chunk 宽度
             currentX += paraChunks[idx].getWidthPoint()
             idx += 1
         }
-        newY
+        newY - para.spacingAfter
     }
 
     /**
@@ -1537,24 +1661,41 @@ public class PdfWriter <: DocListener {
         // 绘制 Phrase
         if (cell.phrase.isSome()) {
             let phrase = cell.phrase.getOrThrow()
+            let font = phrase.font
+            let fontSize = font.size
 
-            // 计算垂直对齐
+            // 垂直对齐：与 OpenPDF 一致，单行用 fontSize 作为行高
             let textY = match (cell.verticalAlignment) {
-                case Top => contentY - phrase.leading
-                case Middle => contentY - (contentHeight - phrase.leading) / 2.0
-                case Bottom | Baseline => contentY - contentHeight + phrase.leading
+                case Top => contentY - fontSize
+                case Middle => contentY - (contentHeight + fontSize) / 2.0
+                case Bottom | Baseline => contentY - contentHeight + fontSize
             }
 
-            // 绘制文本
+            // 水平对齐：计算总文字宽度后按对齐方式确定起始 x
             let chunks = phrase.getChunks()
+            var totalTextWidth: Float32 = 0.0
             var chunkIdx: Int64 = 0
             while (chunkIdx < chunks.size) {
-                drawChunk(chunks[chunkIdx], contentX, textY, cell.horizontalAlignment)
+                totalTextWidth += chunks[chunkIdx].getWidthPoint()
+                chunkIdx += 1
+            }
+            let startX: Float32 = match (cell.horizontalAlignment) {
+                case Alignment.Center => contentX + (contentWidth - totalTextWidth) / 2.0
+                case Alignment.Right => contentX + contentWidth - totalTextWidth
+                case _ => contentX
+            }
+
+            // 逐 chunk 渲染（各 chunk 顺序排列）
+            var cx = startX
+            chunkIdx = 0
+            while (chunkIdx < chunks.size) {
+                drawChunk(chunks[chunkIdx], cx, textY, cell.horizontalAlignment)
+                cx += chunks[chunkIdx].getWidthPoint()
                 chunkIdx += 1
             }
         }
 
-        // 绘制内容元素
+        // 绘制内容元素（Paragraph 等）
         var elementY = contentY
         var i: Int64 = 0
         while (i < cell.contentSize) {
@@ -1574,7 +1715,22 @@ public class PdfWriter <: DocListener {
         // 获取或创建字体资源
         let fontName = getOrCreateFont(baseFont)
 
-        // 绘制文本
+        // ── 背景高亮：在文本 BT..ET 之前绘制填充矩形 ──
+        match (chunk.background) {
+            case Some(bgColor) =>
+                let textWidth = baseFont.getWidthPoint(chunk.content, font.size)
+                // OpenPDF: rectangle(x-1, y-size*0.2, width+2, size+2)
+                let bgY = y - font.size * 0.2
+                let bgH = font.size + 2.0
+                getContent().saveState()
+                getContent().setColorFill(bgColor)
+                getContent().rectangle(x - 1.0, bgY, textWidth + 2.0, bgH)
+                getContent().fill()
+                getContent().restoreState()
+            case None => ()
+        }
+
+        // ── 绘制文本 ──
         getContent().beginText()
         getContent().setFontAndSize(fontName, font.size)
 
@@ -1596,31 +1752,80 @@ public class PdfWriter <: DocListener {
             getContent().setColorFill(Color.BLACK)
         }
 
+        // 粗体：使用 PDF 文本渲染模式 2（fill+stroke）模拟，与 OpenPDF 行为一致
+        if (font.isBold()) {
+            // 描边颜色与填充色保持一致
+            match (chunk.color) {
+                case Some(color) => getContent().setColorStroke(color)
+                case None => match (font.color) {
+                    case Some(color) => getContent().setColorStroke(color)
+                    case None => getContent().setColorStroke(Color.BLACK)
+                }
+            }
+            getContent().setTextRenderingMode(2)
+            getContent().setLineWidth(font.size / 30.0)
+        }
+
         // 设置文本矩阵，如果是斜体则应用倾斜变换
         if (font.isItalic()) {
-            // 斜体倾斜变换矩阵：[1, 0, 0.21, 1, x, y]
-            // 0.21 是标准的斜体倾斜系数（约相当于 12 度）
-            getContent().setTextMatrix(1.0, 0.0, 0.21, 1.0, x, y)
+            // tan(12°) ≈ 0.21256，与 OpenPDF PdfWriter.ITALIC_ANGLE 一致
+            getContent().setTextMatrix(1.0, 0.0, 0.21256, 1.0, x, y)
         } else {
             getContent().setTextMatrix(x, y)
         }
 
         // 根据字体编码选择输出方式
         let useUnicode = baseFont.isUnicodeEncoding()
-        // 标记本段文字用到的字形（供字体子集化使用）
         baseFont.markStringUsed(chunk.content)
-        // 传递 BaseFont 以支持 Unicode 到 Glyph ID 的转换
-        getContent().showText(chunk.content, useUnicode, Some(baseFont))
-
-        // 如果是粗体且没有真正的粗体字体，通过重复绘制模拟粗体效果
-        if (font.isBold()) {
-            // 模拟粗体：略微偏移后再次绘制（fake bold）
-            let offset: Float32 = font.size / 30.0  // 偏移量约为字号的 1/30
-            getContent().setTextMatrix(x + offset, y)
+        // 两端对齐时，词间距通过 TJ kern 实现（因 Tw 对 CID 字体的空格 GID 无效）
+        if (_justifyWordSpacing > 0.0 && useUnicode) {
+            getContent().showTextWithWordSpacing(chunk.content, _justifyWordSpacing, font.size, Some(baseFont))
+        } else {
             getContent().showText(chunk.content, useUnicode, Some(baseFont))
         }
 
+        // 粗体渲染模式重置
+        if (font.isBold()) {
+            getContent().setTextRenderingMode(0)
+            getContent().setLineWidth(1.0)
+        }
+
         getContent().endText()
+
+        // ── 下划线 / 删除线：在文本之后绘制线条 ──
+        if (chunk.underline || chunk.strikethrough) {
+            let textWidth = baseFont.getWidthPoint(chunk.content, font.size)
+            var lineThickness = font.size * 0.05
+            if (lineThickness < 0.5) {
+                lineThickness = 0.5
+            }
+            // 线条颜色：优先 chunk 颜色，然后 font 颜色，最后黑色
+            let lineColor = match (chunk.color) {
+                case Some(c) => c
+                case None => match (font.color) {
+                    case Some(c) => c
+                    case None => Color.BLACK
+                }
+            }
+            getContent().saveState()
+            getContent().setColorStroke(lineColor)
+            getContent().setLineWidth(lineThickness)
+            if (chunk.underline) {
+                // OpenPDF: fixed −2pt below baseline
+                let lineY = y - 2.0
+                getContent().moveTo(x, lineY)
+                getContent().lineTo(x + textWidth, lineY)
+                getContent().stroke()
+            }
+            if (chunk.strikethrough) {
+                // OpenPDF: fontSize/3 above baseline
+                let lineY = y + font.size / 3.0
+                getContent().moveTo(x, lineY)
+                getContent().lineTo(x + textWidth, lineY)
+                getContent().stroke()
+            }
+            getContent().restoreState()
+        }
     }
 
     /**
@@ -1691,7 +1896,7 @@ public class PdfWriter <: DocListener {
         let cidFont = PdfDictionary()
         cidFont.put(PdfName.TYPE, PdfName.FONT)
         cidFont.put(PdfName("Subtype"), PdfName(if (isCFF) { "CIDFontType0" } else { "CIDFontType2" }))
-        cidFont.put(PdfName.BASEFONT, PdfName(baseFont.name))
+        cidFont.put(PdfName.BASEFONT, PdfName(baseFont.getPdfFontName()))
         cidFont.put(PdfName("CIDSystemInfo"), cidSystemInfo)
 
         // 添加默认宽度（CJK 全角字符通常为 1000 单位）
@@ -1728,7 +1933,7 @@ public class PdfWriter <: DocListener {
         let fontDict = PdfDictionary()
         fontDict.put(PdfName.TYPE, PdfName.FONT)
         fontDict.put(PdfName.SUBTYPE, PdfName("Type0"))
-        fontDict.put(PdfName.BASEFONT, PdfName(baseFont.name))
+        fontDict.put(PdfName.BASEFONT, PdfName(baseFont.getPdfFontName()))
         fontDict.put(PdfName.ENCODING, PdfName("Identity-H"))
 
         // 设置 DescendantFonts
@@ -1784,7 +1989,7 @@ public class PdfWriter <: DocListener {
     private func createFontDescriptor(baseFont: BaseFont): PdfDictionary {
         let descriptor = PdfDictionary()
         descriptor.put(PdfName.TYPE, PdfName("FontDescriptor"))
-        descriptor.put(PdfName("FontName"), PdfName(baseFont.name))
+        descriptor.put(PdfName("FontName"), PdfName(baseFont.getPdfFontName()))
 
         // 从 TrueType 字体获取度量（如果有）
         match (baseFont.getTrueTypeFont()) {
@@ -1839,7 +2044,7 @@ public class PdfWriter <: DocListener {
         let stream = PdfStream()
 
         if (ttf.isCFF()) {
-            // OpenType/CFF 字体：子集化后嵌入 CFF 表数据
+            // OpenType/CFF 字体：子集化后嵌入 CFF 表数据，压缩写入
             let rawCFF: Array<UInt8> = match (ttf.getRawTable("CFF ")) {
                 case Some(d) => d
                 case None => Array<UInt8>(0, repeat: UInt8(0))
@@ -1851,17 +2056,22 @@ public class PdfWriter <: DocListener {
                 case None => rawCFF
             }
             stream.put(PdfName("Subtype"), PdfName("CIDFontType0C"))
-            stream.setContent(cffData)
+            let compressedCFF = FlateEncoder.encode(cffData)
+            stream.put(PdfName.FILTER, PdfName.FLATEDECODE)
+            stream.setContent(compressedCFF)
         } else {
-            // TrueType 字体：使用子集数据
+            // TrueType 字体：使用子集数据，压缩写入
             let fontData: Array<UInt8> = match (baseFont.getFontSubset()) {
                 case Some(subset) =>
                     let subsetData = subset.generateSubsetFont()
                     if (subsetData.size > 0) { subsetData } else { ttf.getFontData() }
                 case None => ttf.getFontData()
             }
+            // Length1 = 未压缩字体数据大小（FontFile2 规范要求）
             stream.put(PdfName("Length1"), PdfNumber(Int32(fontData.size)))
-            stream.setContent(fontData)
+            let compressedFont = FlateEncoder.encode(fontData)
+            stream.put(PdfName.FILTER, PdfName.FLATEDECODE)
+            stream.setContent(compressedFont)
         }
 
         stream

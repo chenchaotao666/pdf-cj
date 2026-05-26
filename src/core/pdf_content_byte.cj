@@ -235,6 +235,48 @@ public class PdfContentByte {
     }
 
     /**
+     * 用 TJ 数组显示文本并嵌入词间距（用于 CID 字体两端对齐）
+     *
+     * PDF 规范：Tw 只对字节码 0x20 的 space 生效，对 CID 字体的空格 GID（通常为 0x0001）无效。
+     * 解决方案：在每个空格 GID 之前插入 TJ kern 值（= -wordSpacing*1000/fontSize），
+     * 与 OpenPDF/Java 的实现完全一致。
+     */
+    public func showTextWithWordSpacing(text: String, wordSpacing: Float32, fontSize: Float32, baseFont: ?BaseFont): Unit {
+        // kern 值（负数 = 向右推进）= -wordSpacing * 1000 / fontSize
+        let kern = -(wordSpacing * 1000.0 / fontSize)
+        appendString("[<")
+        var prevWasNonSpace = false
+        for (r in text.runes()) {
+            let code = UInt32(r)
+            let isSpace = (r == r' ')
+            if (isSpace && prevWasNonSpace) {
+                // 在每个空格前关闭当前 hex 段，插入 kern，开启新段
+                appendString("> ")
+                appendFloat(kern)
+                appendString(" <")
+            }
+            let glyphId: UInt16 = match (baseFont) {
+                case Some(font) =>
+                    let gid = font.getGlyphId(code)
+                    if (gid == 0 && code != 0) {
+                        if (code <= 0xFFFF) { UInt16(code) } else { UInt16(0) }
+                    } else {
+                        gid
+                    }
+                case None =>
+                    if (code <= 0xFFFF) { UInt16(code) } else { UInt16(0) }
+            }
+            let high = UInt8((glyphId >> 8) & 0xFF)
+            let low = UInt8(glyphId & 0xFF)
+            appendByteAsHex(high)
+            appendByteAsHex(low)
+            prevWasNonSpace = !isSpace
+        }
+        appendString(">]TJ")
+        appendNewLine()
+    }
+
+    /**
      * 移动文本位置
      */
     public func moveText(x: Float32, y: Float32): Unit {

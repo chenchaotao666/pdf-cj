@@ -19,7 +19,7 @@ public class PdfPCell <: Element {
 
     // 边框属性
     private var _border: Int32 = Border.BOX
-    private var _borderWidth: Float32 = 1.0
+    private var _borderWidth: Float32 = 0.5
     private var _borderColor: ?Color = None
 
     // 背景
@@ -60,9 +60,11 @@ public class PdfPCell <: Element {
 
     /**
      * 使用 Paragraph 创建单元格
+     * 与 OpenPDF 一致：构造器传入的单个 Paragraph 走 simple mode（高度=font.size）
+     * 通过 addElement() 添加的多段落走 composite mode（高度=leading）
      */
     public init(paragraph: Paragraph) {
-        _content.add(paragraph)
+        this._phrase = Some(paragraph)
     }
 
     /**
@@ -390,16 +392,19 @@ public class PdfPCell <: Element {
 
         match (_phrase) {
             case Some(p) =>
-                height += estimateWrappedHeight(p.getWidth(), p.leading, availW)
+                // 与 OpenPDF 一致：单行高度 = font.size，多行高度 = lines * leading
+                let fontSize = p.font.size
+                height += estimateWrappedHeight(p.getWidth(), fontSize, p.leading, availW)
             case None => ()
         }
 
+        // composite mode（via addElement）：每个段落用 leading 计算高度，与 OpenPDF 一致
         var i: Int64 = 0
         while (i < _content.size) {
             match (_content[i]) {
                 case para: Paragraph =>
                     height += para.spacingBefore
-                    height += estimateWrappedHeight(para.getWidth(), para.leading, availW)
+                    height += estimateWrappedHeight(para.getWidth(), para.leading, para.leading, availW)
                     height += para.spacingAfter
                 case _ =>
                     height += 14.0
@@ -416,15 +421,17 @@ public class PdfPCell <: Element {
         height
     }
 
-    private func estimateWrappedHeight(textWidth: Float32, leading: Float32, availWidth: Float32): Float32 {
+    // 单行高度 = fontSize，多行高度 = lines * leading（与 OpenPDF 一致）
+    private func estimateWrappedHeight(textWidth: Float32, fontSize: Float32, leading: Float32, availWidth: Float32): Float32 {
         if (availWidth <= 0.0 || textWidth <= 0.0) {
-            return leading
+            return fontSize
         }
         if (textWidth <= availWidth) {
-            return leading
+            return fontSize
         }
         let lines = Float32(Int64(textWidth / availWidth)) + 1.0
-        lines * leading
+        // 首行用 fontSize，后续行用 leading
+        fontSize + (lines - 1.0) * leading
     }
 
     // ===== Element 接口实现 =====

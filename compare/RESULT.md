@@ -2,7 +2,7 @@
 
 > 自动生成 by `compare/run_compare.sh`
 
-DATE: 2026-05-25 15:08:29
+DATE: 2026-05-25 15:24:56
 
 ## 文件大小对比
 
@@ -408,3 +408,117 @@ Helvetica                            Type 1            WinAnsi          no  no  
 | 9 | **PageEvent** | 必须命名类 | 可匿名内部类 | 语言特性差异，非 API 差异 |
 | 10 | **CMYK 参数** | `Float32` 0.0~1.0 | `int` 0~255（2.x 变更） | 1.x 也是 float，2.x 为破坏性变更 |
 
+
+  优化方案设计
+
+  问题根因
+
+  所有 Section 文件大 7x 的核心原因只有一个：
+
+  pdf-cj: sub=no  → 嵌入完整 CFF（~1.53MB，含 18 个 FD 的全量 LocalSubrs）
+  OpenPDF: sub=yes → 嵌入真正子集（~200KB，只保留用到的字形和子程序）
+
+  ---
+  优化分级
+
+  ┌────────┬──────────────────────────┬─────────────────────────────┬────────┐
+  │ 优先级 │           问题           │            收益             │ 复杂度 │
+  ├────────┼──────────────────────────┼─────────────────────────────┼────────┤
+  │ P0     │ CFF LocalSubrs 子集化    │ 文件从 1.5MB → ~200KB（7x） │ 高     │
+  ├────────┼──────────────────────────┼─────────────────────────────┼────────┤
+  │ P1     │ ToUnicode CMap（uni=no） │ 支持 PDF 文本复制/搜索      │ 中     │
+  ├────────┼──────────────────────────┼─────────────────────────────┼────────┤
+  │ P2     │ 移除废弃的 /ProcSet      │ 减少结构噪声                │ 低     │
+  ├────────┼──────────────────────────┼─────────────────────────────┼────────┤
+  │ P3     │ PDF 版本升到 1.5         │ 对齐 OpenPDF                │ 低     │
+  └────────┴──────────────────────────┴─────────────────────────────┴────────┘
+
+  ---
+  P0：CFF LocalSubrs 子集化（核心）
+
+  CFF 结构分析（NotoSansCJK）：
+
+  CharStrings:  ~245 KB   ← 上轮已裁剪到 maxUsedGlyph+1
+  LocalSubrs:  ~1220 KB   ← 瓶颈！FD[12]=936KB, FD[11]=257KB
+  GlobalSubrs:   ~13 KB
+
+  方案 A：FD 级过滤（快，先做）
+
+  思路：解析 FDSelect，找出哪些 FD 被用到的字形引用。未被引用的 FD，将其整个
+  LocalSubrs INDEX 替换为空 INDEX（2 字节 0x00 0x00）。
+
+  效果估计：18 个 FD 中，典型文档只用 1-3 个（Latin + CJK），可省去 15 个 FD 的
+  subrs。
+
+  实现位置：cff_subsetter.cj 的 generateSubset() 末尾，在复制 part3
+  后、拼接之前，patch 掉 part3 中未使用 FD 的 LocalSubrs。
+
+  步骤：
+  1. 解析 FDSelect（已有 fdSelectOff）→ 建立 gid → fdIndex 映射
+  2. 对 usedGlyphs 所有 GID 收集 usedFDs: Set<Int32>
+  3. 遍历 FDArray 中每个 FD，读取 Private Dict 中的 LocalSubrs 偏移
+  4. 若 FD 不在 usedFDs：将 part3 中该 LocalSubrs INDEX 的 count 字段清零（2 字节写
+   0）
+
+  方案 B：Subr 级过滤（彻底，匹配 OpenPDF）
+
+  思路：对已用字形的 charstring 做 Type 2 字节码扫描，追踪 callsubr(op 10) /
+  callgsubr(op 29) 调用链，只保留实际被调用的 subr。
+
+  关键公式（Type 2 bias）：
+  count < 1240  → bias = 107
+  count < 33900 → bias = 1131
+  else          → bias = 32768
+  actual_subr_index = operand + bias
+
+  步骤（针对每个 usedFD）：
+  1. 收集该 FD 下所有已用字形的 charstring 原始字节
+  2. 扫描字节码：遇到 10（callsubr）记录 local subr index；遇到 29（callgsubr）记录
+   global subr index；遇到 12 xx（escape）跳过 2 字节
+  3. 对每个被调用的 subr，递归扫描其字节码（防循环：用已访问集合）
+  4. 重建该 FD 的 LocalSubrs INDEX：已用 → 保留原始数据；未用 → 替换为
+  \x0e（endchar）
+
+  实现顺序建议：先做方案 A 验证框架正确性，再补方案 B 实现 subr 级精确过滤。
+
+  ---
+  P1：ToUnicode CMap（uni=no → uni=yes）
+
+  OpenPDF 生成了 ToUnicode 流，使 PDF 阅读器可以正确复制文字。
+
+  实现位置：pdf_writer.cj 的 createCIDFont() 附近，添加 /ToUnicode stream 对象。
+
+  内容：遍历 usedGlyphs，为每个 (CID, Unicode) 对生成 CMap 映射：
+
+  /CIDInit /ProcSet findresource begin
+  12 dict begin
+  begincmap
+  /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> def
+  /CMapName /Adobe-Identity-UCS2 def
+  /CMapType 1 def
+  N beginbfrange
+  <0034> <0034> <4e2d>
+  ...
+  endbfrange
+  endcmap
+  CMap currentdict end
+  end
+
+  ---
+  P2：移除 /ProcSet
+
+  /ProcSet 在 PDF 1.4 之后已废弃，OpenPDF 2.x 不再输出。搜索 pdf_writer.cj 中生成
+  /ProcSet 的位置，直接删除该 dict entry。
+
+  ---
+  P3：PDF 版本升到 1.5
+
+  在 pdf_writer.cj 写入文件头的位置（%PDF-1.4），改为 %PDF-1.5。
+
+  ---
+  实施路径建议
+
+  第一步：方案 A（FD 级过滤）→ 预期文件降到 ~400-500KB
+  第二步：方案 B（Subr 级过滤）→ 预期文件降到 ~200KB
+  第三步：P2 + P3（各约 5 行改动）→ 结构对齐
+  第四步：P1（ToUnicode）→ 功能完整性

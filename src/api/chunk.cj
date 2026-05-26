@@ -16,6 +16,9 @@ public class Chunk <: Element {
     private var _content: String
     private var _font: Font
     private var _color: ?Color = None
+    private var _underline: Bool = false
+    private var _strikethrough: Bool = false
+    private var _background: ?Color = None
 
     // 预定义常量
     public static let NEWLINE = Chunk("\n")
@@ -97,6 +100,51 @@ public class Chunk <: Element {
      */
     public func setColor(color: Color): Chunk {
         this._color = Some(color)
+        this
+    }
+
+    /**
+     * 获取下划线标志
+     */
+    public prop underline: Bool {
+        get() { _underline }
+    }
+
+    /**
+     * 获取删除线标志
+     */
+    public prop strikethrough: Bool {
+        get() { _strikethrough }
+    }
+
+    /**
+     * 获取背景色
+     */
+    public prop background: ?Color {
+        get() { _background }
+    }
+
+    /**
+     * 设置下划线
+     */
+    public func setUnderline(): Chunk {
+        this._underline = true
+        this
+    }
+
+    /**
+     * 设置删除线
+     */
+    public func setStrikethrough(): Chunk {
+        this._strikethrough = true
+        this
+    }
+
+    /**
+     * 设置背景色
+     */
+    public func setBackground(color: Color): Chunk {
+        this._background = Some(color)
         this
     }
 

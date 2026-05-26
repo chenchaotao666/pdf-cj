@@ -17,6 +17,7 @@ public class BaseFont {
     private let fontPath: ?String  // TrueType 字体文件路径
     private var ttfFont: ?TrueTypeFont = None  // TrueType 字体对象
     private var fontSubset: ?FontSubsetting = None  // 字体子集化对象（用于嵌入字体）
+    private var _subsetFontName: ?String = None  // 子集字体名称（6字符前缀+字体名）
 
     // 标准 14 字体名称
     public static let COURIER = "Courier"
@@ -190,9 +191,11 @@ public class BaseFont {
             let font = TrueTypeFont(path)
             ttfFont = Some(font)
 
-            // 如果需要嵌入字体，创建子集化对象
+            // 如果需要嵌入字体，创建子集化对象并生成子集前缀
             if (embedded) {
                 fontSubset = Some(FontSubsetting(font))
+                let prefix = generateSubsetPrefix(path)
+                _subsetFontName = Some("${prefix}+${fontName}")
             }
         } catch (e: Exception) {
             throw PdfException("Failed to load TrueType font: ${path}, error: ${e.message}")
@@ -326,10 +329,30 @@ public class BaseFont {
     }
 
     /**
-     * 获取 PDF 字体名称
+     * 获取 PDF 字体名称（嵌入子集字体时带6字符前缀，如 "ABCDEF+FontName"）
      */
     public func getPdfFontName(): String {
-        fontName
+        match (_subsetFontName) {
+            case Some(name) => name
+            case None => fontName
+        }
+    }
+
+    /**
+     * 生成子集字体名称前缀（6个大写字母，基于字体路径的哈希）
+     */
+    private static func generateSubsetPrefix(fontPath: String): String {
+        var h: Int64 = 5381
+        for (c in fontPath.runes()) {
+            h = ((h << 5) + h + Int64(UInt32(c))) & 0x7FFFFFFF
+        }
+        var prefix = ""
+        for (i in 0..6) {
+            let idx = h % 26
+            prefix = "${prefix}${Rune(UInt8(65 + idx))}"
+            h = h / 26
+        }
+        prefix
     }
 
     /**

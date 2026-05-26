@@ -29,6 +29,10 @@ Thumbs.db
 # Generated PDFs (from examples)
 *.pdf
 
+# Compiled example binaries (cjc -o output)
+examples/main
+examples/output/
+
 # Logs
 *.log
 
