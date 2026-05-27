@@ -36,7 +36,7 @@
  */
 package pdf_cj_examples
 
-import pdf_cj.api.{Document, Paragraph, Phrase, Chunk}
+import pdf_cj.api.{Document, Paragraph, Phrase, Chunk, Anchor}
 import pdf_cj.core.{PdfWriter, PdfContentByte, PdfPageEventHelper}
 import pdf_cj.form.{PdfAnnotationFactory, PdfOutline, PdfDestination}
 import pdf_cj.image.Image
@@ -779,26 +779,12 @@ func section6_bookmark(): Unit {
         //   anchor.setReference("https://...");
         //   doc.add(new Paragraph(anchor));
         //
-        // ★ Cangjie: 使用低层 PdfAnnotationFactory.createLink + PdfContentByte 绘制可见区域
-        //   两侧 API 风格差异最大的地方
-
-        // 可见文字（内容流中绘制）
-        let cb = writer.getDirectContent()
-        let hN = writer.addFont(CJK_BF)
-        cb.saveState()
-        cb.setColorFill(Color(0, 102, 204))
-        cb.beginText()
-        cb.setFontAndSize(CJK_BF, hN, 12.0)
-        let linkY: Float32 = PageSize.A4.height - 380.0
-        cb.showTextAligned(PdfContentByte.ALIGN_LEFT,
-            "← 点击访问 OpenPDF 项目主页（低层注释 API）", 72.0, linkY, 0.0)
-        cb.endText()
-        cb.restoreState()
-
-        // 注释区域
-        let linkRect = Rectangle(72.0, linkY - 4.0, 430.0, linkY + 14.0)
-        let linkAnnot = PdfAnnotationFactory.createURLLink(linkRect, "https://github.com/LibrePDF/OpenPDF")
-        writer.addAnnotation(linkAnnot)
+        // ★ Cangjie: 与 Java 一致，直接使用 Anchor 高层 API
+        let anchor = Anchor("← 点击访问 OpenPDF 项目主页（Anchor 高层 API）", cjk(12.0))
+        anchor.setReference("https://github.com/LibrePDF/OpenPDF")
+        let anchorPara = Paragraph()
+        anchorPara.add(anchor)
+        doc.add(anchorPara)
 
         doc.close()
         file.close()

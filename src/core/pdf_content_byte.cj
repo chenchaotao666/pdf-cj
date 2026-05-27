@@ -953,9 +953,47 @@ public class PdfContentByte {
         }
     }
 
+    // Windows-1252 反向映射表：Unicode → WinAnsi byte
+    // - code <= 0xFF：直接映射（U+00A0-U+00FF 与 WinAnsi 0xA0-0xFF 一一对应）
+    // - 0x80-0x9F 范围的 WinAnsi 扩展字符：返回对应字节
+    // - 其他不可映射字符（如中文）：返回 None，由调用方静默跳过（与 Java 行为一致）
+    private static func winAnsiEncode(code: UInt32): ?UInt8 {
+        if (code <= 0xFF) { return Some(UInt8(code)) }
+        match (code) {
+            case 0x20AC => Some(UInt8(0x80))  // €
+            case 0x201A => Some(UInt8(0x82))  // ‚
+            case 0x0192 => Some(UInt8(0x83))  // ƒ
+            case 0x201E => Some(UInt8(0x84))  // „
+            case 0x2026 => Some(UInt8(0x85))  // …
+            case 0x2020 => Some(UInt8(0x86))  // †
+            case 0x2021 => Some(UInt8(0x87))  // ‡
+            case 0x02C6 => Some(UInt8(0x88))  // ˆ
+            case 0x2030 => Some(UInt8(0x89))  // ‰
+            case 0x0160 => Some(UInt8(0x8A))  // Š
+            case 0x2039 => Some(UInt8(0x8B))  // ‹
+            case 0x0152 => Some(UInt8(0x8C))  // Œ
+            case 0x017D => Some(UInt8(0x8E))  // Ž
+            case 0x2018 => Some(UInt8(0x91))  // '
+            case 0x2019 => Some(UInt8(0x92))  // '
+            case 0x201C => Some(UInt8(0x93))  // "
+            case 0x201D => Some(UInt8(0x94))  // "
+            case 0x2022 => Some(UInt8(0x95))  // •
+            case 0x2013 => Some(UInt8(0x96))  // –
+            case 0x2014 => Some(UInt8(0x97))  // —
+            case 0x02DC => Some(UInt8(0x98))  // ˜
+            case 0x2122 => Some(UInt8(0x99))  // ™
+            case 0x0161 => Some(UInt8(0x9A))  // š
+            case 0x203A => Some(UInt8(0x9B))  // ›
+            case 0x0153 => Some(UInt8(0x9C))  // œ
+            case 0x017E => Some(UInt8(0x9E))  // ž
+            case 0x0178 => Some(UInt8(0x9F))  // Ÿ
+            case _ => None                     // 不可映射字符静默跳过
+        }
+    }
+
     private func appendEscapedString(s: String): Unit {
-        for (c in s) {
-            let code = UInt32(c)
+        for (r in s.runes()) {
+            let code = UInt32(r)
             if (code == 0x28) {  // (
                 content.add(ByteWrapper(UInt8(0x5C)))
                 content.add(ByteWrapper(UInt8(0x28)))
@@ -966,7 +1004,10 @@ public class PdfContentByte {
                 content.add(ByteWrapper(UInt8(0x5C)))
                 content.add(ByteWrapper(UInt8(0x5C)))
             } else {
-                content.add(ByteWrapper(UInt8(code)))
+                match (winAnsiEncode(code)) {
+                    case Some(b) => content.add(ByteWrapper(b))
+                    case None => ()
+                }
             }
         }
     }

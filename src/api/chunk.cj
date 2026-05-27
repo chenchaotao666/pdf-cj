@@ -31,6 +31,7 @@ public class Chunk <: Element {
     public static let LOCALDESTINATION = "LOCALDESTINATION"
     public static let GENERICTAG = "GENERICTAG"
     public static let NEWPAGE_TAG = "NEWPAGE"
+    public static let ANCHOR = "ANCHOR"
 
     // 附加属性
     private var attributes: ?HashMap<String, String> = None
@@ -161,6 +162,14 @@ public class Chunk <: Element {
      */
     public func getWidthPoint(): Float32 {
         _font.getWidthPoint(_content)
+    }
+
+    /**
+     * 设置超链接 URL（供 Anchor 使用）
+     */
+    public func setAnchorURL(url: String): Chunk {
+        setAttribute(ANCHOR, url)
+        this
     }
 
     /**

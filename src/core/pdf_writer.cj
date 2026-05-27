@@ -10,12 +10,12 @@ import pdf_cj.base.{
     PdfObject, PdfDictionary, PdfName, PdfNumber, PdfString, PdfArray,
     PdfStream, PdfIndirectReference, PdfOutputStream, PdfFileOutputStream, PdfBoolean
 }
-import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phrase, Chunk, HeaderFooter}
+import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phrase, Chunk, HeaderFooter, Anchor}
 import pdf_cj.util.{Rectangle, PageSize, PdfException}
 import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
 import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser, Jp2Parser}
-import pdf_cj.form.{PdfAnnotation, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination}
+import pdf_cj.form.{PdfAnnotation, PdfAnnotationFactory, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination}
 import pdf_cj.codec.FlateEncoder
 import pdf_cj.security.PdfEncryption
 import zlib4cj.{Zlib, ZlibType}
@@ -520,6 +520,7 @@ public class PdfWriter <: DocListener {
         match (element.getType()) {
             case Paragraph => addParagraph(element)
             case Phrase => addPhrase(element)
+            case Anchor => addAnchor(element)
             case Chunk => addChunk(element)
             case Table => addTable(element)
             case Image => addImage(element)
@@ -756,6 +757,10 @@ public class PdfWriter <: DocListener {
                             case Some(bg) => _ = seg.setBackground(bg)
                             case None => ()
                         }
+                        match (chunk.getAttribute(Chunk.ANCHOR)) {
+                            case Some(url) => _ = seg.setAnchorURL(url)
+                            case None => ()
+                        }
                         currentLine.add(seg)
                     }
                     // 保存本行，开启新行
@@ -782,6 +787,10 @@ public class PdfWriter <: DocListener {
                 if (chunk.strikethrough) { _ = seg.setStrikethrough() }
                 match (chunk.background) {
                     case Some(bg) => _ = seg.setBackground(bg)
+                    case None => ()
+                }
+                match (chunk.getAttribute(Chunk.ANCHOR)) {
+                    case Some(url) => _ = seg.setAnchorURL(url)
                     case None => ()
                 }
                 currentLine.add(seg)
@@ -865,11 +874,20 @@ public class PdfWriter <: DocListener {
                 }
             }
 
-            // 逐 chunk 渲染
+            // 逐 chunk 渲染，顺带检测 Anchor URL 并生成 Link 注释
             var cx = startX
             for (seg in line) {
                 drawChunk(seg, cx, _currentY, para.alignment)
-                cx += seg.getWidthPoint()
+                let segW = seg.getWidthPoint()
+                match (seg.getAttribute(Chunk.ANCHOR)) {
+                    case Some(url) =>
+                        let lly = _currentY - seg.font.size * 0.2
+                        let ury = _currentY + seg.font.size * 0.8
+                        let linkRect = Rectangle(cx, lly, cx + segW, ury)
+                        addAnnotation(PdfAnnotationFactory.createURLLink(linkRect, url))
+                    case None => ()
+                }
+                cx += segW
             }
 
             // 重置字符间距（词间距通过 _justifyWordSpacing 在 drawChunk 内处理）
@@ -900,6 +918,21 @@ public class PdfWriter <: DocListener {
     private func addPhrase(element: Element): Bool {
         match (element) {
             case phrase: Phrase => processPhrase(phrase)
+            case _ => false
+        }
+    }
+
+    /**
+     * 将独立使用的 Anchor 包装为 Paragraph 后渲染
+     */
+    private func addAnchor(element: Element): Bool {
+        match (element) {
+            case anchor: Anchor =>
+                let para = Paragraph(anchor.leading)
+                for (chunk in anchor.getChunks()) {
+                    para.addChunk(chunk)
+                }
+                processParagraph(para)
             case _ => false
         }
     }

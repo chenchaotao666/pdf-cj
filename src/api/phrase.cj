@@ -107,6 +107,7 @@ public open class Phrase <: Element {
         match (element.getType()) {
             case Chunk => addChunk(element)
             case Phrase => addPhrase(element)
+            case Anchor => addPhrase(element)  // Anchor is-a Phrase，chunks 携带 URL 属性
             case _ => false
         }
     }
@@ -117,6 +118,15 @@ public open class Phrase <: Element {
     }
 
     private func addPhrase(element: Element): Bool {
+        // 与 OpenPDF 一致：子 Phrase/Anchor 的 leading 若更大则传递给父段落
+        // Java: leading = Math.max(leading, phrase.getLeading())
+        match (element) {
+            case phrase: Phrase =>
+                if (phrase.leading > _leading) {
+                    _leading = phrase.leading
+                }
+            case _ => ()
+        }
         for (chunk in element.getChunks()) {
             chunks.add(chunk)
         }
@@ -182,7 +192,7 @@ public open class Phrase <: Element {
         ElementType.Phrase
     }
 
-    public func getChunks(): ArrayList<Chunk> {
+    public open func getChunks(): ArrayList<Chunk> {
         let result = ArrayList<Chunk>()
         for (element in chunks) {
             match (element) {
