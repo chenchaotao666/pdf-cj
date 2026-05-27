@@ -63,6 +63,14 @@ public class Image <: Element {
     // 绝对位置
     private var _absoluteX: Float32 = 0.0
     private var _absoluteY: Float32 = 0.0
+    private var _hasAbsolutePosition: Bool = false
+
+    // 图片间距（与 OpenPDF setSpacingBefore/setSpacingAfter 对应）
+    private var _spacingBefore: Float32 = 0.0
+    private var _spacingAfter: Float32 = 0.0
+
+    // JPEG 内嵌 ICC Profile 数据（若存在）
+    private var _iccProfile: ?Array<UInt8> = None
 
     // 透明度
     private var _transparency: ?Array<Int32> = None
@@ -260,36 +268,91 @@ public class Image <: Element {
      */
     private func parseJpegData(data: Array<UInt8>): Unit {
         // JPEG标记：FF D8 = SOI (Start of Image)
-        // 寻找SOF标记 (Start of Frame): FF C0 或 FF C2
+        // 扫描所有段，提取尺寸（SOF）和 ICC Profile（APP2）
         var i: Int64 = 2  // 跳过SOI标记
 
-        while (i < data.size - 10) {
-            if (data[i] == UInt8(0xFF)) {
-                let marker = data[i + 1]
-                // SOF0 (Baseline) = 0xC0, SOF2 (Progressive) = 0xC2
-                if (marker == UInt8(0xC0) || marker == UInt8(0xC2)) {
-                    // SOF块格式：FF Cn (2) + 长度(2) + 精度(1) + 高(2) + 宽(2) + ...
+        // 收集 APP2 ICC Profile 数据（顺序拼接，实际几乎都是单分片）
+        let iccParts = ArrayList<UInt8>()
+
+        while (i < data.size - 4) {
+            if (data[i] != UInt8(0xFF)) {
+                i += 1
+                continue
+            }
+            let marker = data[i + 1]
+
+            // SOF0/SOF1/SOF2/SOF3：图片尺寸
+            if (marker == UInt8(0xC0) || marker == UInt8(0xC1) ||
+                marker == UInt8(0xC2) || marker == UInt8(0xC3)) {
+                if (i + 8 < data.size) {
                     let height = (Int32(data[i + 5]) << 8) | Int32(data[i + 6])
                     let width = (Int32(data[i + 7]) << 8) | Int32(data[i + 8])
                     this._width = Float32(width)
                     this._height = Float32(height)
-                    return
                 }
-                // 跳过当前段
-                if (i + 2 < data.size) {
-                    let segmentLength = (Int32(data[i + 2]) << 8) | Int32(data[i + 3])
-                    i += Int64(segmentLength) + 2
+            }
+
+            // APP2 = 0xE2：可能包含 ICC_PROFILE
+            if (marker == UInt8(0xE2) && i + 17 < data.size) {
+                let segLen = (Int32(data[i + 2]) << 8) | Int32(data[i + 3])
+                // 检查 ICC_PROFILE\0 标识（I C C _ P R O F I L E \0）
+                let iccSig = [0x49u8, 0x43u8, 0x43u8, 0x5Fu8, 0x50u8, 0x52u8,
+                              0x4Fu8, 0x46u8, 0x49u8, 0x4Cu8, 0x45u8, 0x00u8]
+                var isICC = true
+                var si: Int64 = 0
+                while (si < 12) {
+                    if (i + 4 + si >= data.size || data[i + 4 + si] != iccSig[si]) {
+                        isICC = false
+                    }
+                    si += 1
+                }
+                if (isICC) {
+                    // 数据从 offset 18 开始：FF E2(2) + len(2) + sig(12) + seq(1) + total(1) = 18
+                    let dataStart = i + 18
+                    let dataLen = Int64(segLen) - 16
+                    if (dataLen > 0 && dataStart + dataLen <= data.size) {
+                        var di: Int64 = dataStart
+                        while (di < dataStart + dataLen) {
+                            iccParts.add(data[di])
+                            di += 1
+                        }
+                    }
+                }
+            }
+
+            // SOS (0xDA) 之后是压缩数据，停止扫描
+            if (marker == UInt8(0xDA)) {
+                break
+            }
+
+            if (i + 3 < data.size) {
+                let segmentLength = (Int32(data[i + 2]) << 8) | Int32(data[i + 3])
+                if (segmentLength < 2) {
+                    i += 2
                 } else {
-                    i += 1
+                    i += Int64(segmentLength) + 2
                 }
             } else {
-                i += 1
+                break
             }
         }
 
-        // 如果没找到，使用默认值
-        this._width = 100.0
-        this._height = 100.0
+        // 将 ArrayList<UInt8> 转为 Array<UInt8>
+        if (!iccParts.isEmpty()) {
+            var combined = Array<UInt8>(iccParts.size, {_ => UInt8(0)})
+            var pi: Int64 = 0
+            while (pi < iccParts.size) {
+                combined[pi] = iccParts[pi]
+                pi += 1
+            }
+            this._iccProfile = Some(combined)
+        }
+
+        // 没找到尺寸则用默认值
+        if (this._width == 0.0) {
+            this._width = 100.0
+            this._height = 100.0
+        }
     }
 
     /**
@@ -403,6 +466,7 @@ public class Image <: Element {
     public func setAbsolutePosition(x: Float32, y: Float32): Unit {
         this._absoluteX = x
         this._absoluteY = y
+        this._hasAbsolutePosition = true
     }
 
     /**
@@ -417,6 +481,48 @@ public class Image <: Element {
      */
     public prop absoluteY: Float32 {
         get() { _absoluteY }
+    }
+
+    /**
+     * 是否已设置绝对位置
+     */
+    public prop hasAbsolutePosition: Bool {
+        get() { _hasAbsolutePosition }
+    }
+
+    /**
+     * 设置图片前间距（对应 OpenPDF setSpacingBefore）
+     */
+    public func setSpacingBefore(spacing: Float32): Unit {
+        this._spacingBefore = spacing
+    }
+
+    /**
+     * 获取图片前间距
+     */
+    public prop spacingBefore: Float32 {
+        get() { _spacingBefore }
+    }
+
+    /**
+     * 设置图片后间距（对应 OpenPDF setSpacingAfter）
+     */
+    public func setSpacingAfter(spacing: Float32): Unit {
+        this._spacingAfter = spacing
+    }
+
+    /**
+     * 获取图片后间距
+     */
+    public prop spacingAfter: Float32 {
+        get() { _spacingAfter }
+    }
+
+    /**
+     * 获取 ICC Profile 数据（JPEG 内嵌，若存在）
+     */
+    public prop iccProfile: ?Array<UInt8> {
+        get() { _iccProfile }
     }
 
     // ===== 尺寸属性 =====

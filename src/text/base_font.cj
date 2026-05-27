@@ -305,6 +305,45 @@ public class BaseFont {
     }
 
     /**
+     * 计算文本实际 descender（与 OpenPDF 一致：取所有字形 yMin 的最小值转换为点数）
+     * 返回正值（下沉量），0 表示文本不含 descender 字形
+     *
+     * 对于 glyf-based TrueType 字体：读取实际字形 yMin
+     * 对于 CFF-based OpenType 字体（如 NotoSansCJK）：检测深 descender 字符 (j/p/q/y) 并使用 hhea descent
+     */
+    public func getTextDescentPt(text: String, fontSize: Float32): Float32 {
+        match (ttfFont) {
+            case Some(ttf) =>
+                if (!ttf.isCFF()) {
+                    // glyf-based TrueType: 用实际字形 yMin
+                    var minY: Int32 = 0
+                    for (r in text.runes()) {
+                        let gid = ttf.getGlyphId(UInt32(r))
+                        let yMin = ttf.getGlyphYMin(gid)
+                        if (yMin < minY) { minY = yMin }
+                    }
+                    if (minY >= 0) { return 0.0 }
+                    Float32(-minY) * fontSize / Float32(ttf.getUnitsPerEm())
+                } else {
+                    // CFF-based OpenType (如 NotoSansCJK): 检测深 descender 字符
+                    // j/p/q/y 在大多数拉丁字体中具有深 descender；CJK 字符无 descender
+                    var hasDeepDescender = false
+                    for (r in text.runes()) {
+                        if (r == r'j' || r == r'p' || r == r'q' || r == r'y') {
+                            hasDeepDescender = true
+                        }
+                    }
+                    if (!hasDeepDescender) { return 0.0 }
+                    let d = ttf.getDescent()  // hhea descent, 负值如 -288
+                    if (d >= 0) { return 0.0 }
+                    Float32(-d) * fontSize / Float32(ttf.getUnitsPerEm())
+                }
+            case None =>
+                0.0
+        }
+    }
+
+    /**
      * 获取行高
      */
     public func getLineHeight(fontSize: Float32): Float32 {

@@ -430,11 +430,10 @@ func section3_image(): Unit {
         // Java:    img.setAlignment(Image.MIDDLE)  int 常量
         // Cangjie: img.setAlignment(Alignment.Center)  枚举
         img1.setAlignment(Alignment.Center)
-        // ★ pdf-cj Image 无 setSpacingBefore/setSpacingAfter，用空段落间隔
-        // ★ Java Image 有 setSpacingBefore(float) / setSpacingAfter(float)
-        doc.add(Paragraph(""))
+        // Java / Cangjie: setSpacingBefore/setSpacingAfter 方法名完全相同
+        img1.setSpacingBefore(6.0)
+        img1.setSpacingAfter(14.0)
         doc.add(img1)
-        doc.add(Paragraph(""))
 
         // ── 3-B: PNG 嵌入（scalePercent） ─────────────────────────────────
         doc.add(Paragraph("3-B: PNG 嵌入（mountain.png，scalePercent 30%）", cjkBold(12.0)))
@@ -442,9 +441,9 @@ func section3_image(): Unit {
         // Java / Cangjie: scalePercent(float) 方法名相同，参数类型 float/Float32
         img2.scalePercent(30.0)
         img2.setAlignment(Alignment.Center)
-        doc.add(Paragraph(""))
+        img2.setSpacingBefore(6.0)
+        img2.setSpacingAfter(14.0)
         doc.add(img2)
-        doc.add(Paragraph(""))
 
         // ── 3-C: 三种对齐方式 ──────────────────────────────────────────────
         doc.add(Paragraph("3-C: 三种对齐方式（nodes.jpeg，scalePercent 15%）", cjkBold(12.0)))
@@ -457,8 +456,8 @@ func section3_image(): Unit {
             let imgX = Image.getInstance(IMG_DIR + "nodes.jpeg")
             imgX.scalePercent(15.0)
             imgX.setAlignment(align)
+            imgX.setSpacingAfter(8.0)
             doc.add(imgX)
-            doc.add(Paragraph(""))
         }
 
         // ── 3-D: scaleAbsolute 固定尺寸 ────────────────────────────────────

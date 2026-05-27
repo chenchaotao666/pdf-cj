@@ -101,6 +101,8 @@ public class PdfWriter <: DocListener {
     private var _prevJustifyTw: Float32 = 0.0
     // 上一段落使用的 leading（用于空段落行高，与 OpenPDF 行为一致）
     private var _lastLeading: Float32 = 0.0
+    // 等待放置的图片（与 OpenPDF imageWait 机制一致：当图片放不下时先缓存，下次换页时再放置）
+    private var _imageWait: ?Image = None
 
     // PDF 版本
     public static let PDF_VERSION_1_4 = "1.4"
@@ -316,6 +318,14 @@ public class PdfWriter <: DocListener {
 
         // 重置绘图位置
         _currentY = _pageSize.height - _marginTop
+
+        // 与 OpenPDF 一致：新页时若有缓存的 imageWait 则立即放置
+        match (_imageWait) {
+            case Some(img) =>
+                _imageWait = None
+                _ = processImage(img)
+            case None => ()
+        }
 
         // 绘制页眉
         match (_header) {
@@ -953,14 +963,48 @@ public class PdfWriter <: DocListener {
             case None => return false
         }
 
-        // 检查是否需要分页
+        let imageWidth = image.scaledWidth
         let imageHeight = image.scaledHeight
-        if (_currentY - imageHeight < _marginBottom) {
-            newPage()
+
+        // 若设置了绝对坐标，直接放置，不影响文档流
+        if (image.hasAbsolutePosition) {
+            let iccRef = embedIccProfile(image)
+            let imageXObject = createImageXObject(image, rawData, iccRef)
+            let imageObjNum = _body.reserveObjectNumber()
+            encryptStream(imageXObject, imageObjNum)
+            let imageRef = _body.add(imageXObject, imageObjNum)
+            let imageName = _resources.addXObject(imageRef)
+            drawImage(imageName, image.absoluteX, image.absoluteY, imageWidth, imageHeight)
+            return true
         }
 
+        // 与 OpenPDF 一致：图片与上方文本的间距 = lastLeading / 2
+        let f = _lastLeading / 2.0
+        _currentY -= f
+
+        // 与 OpenPDF imageWait 机制一致：
+        // - 第一次放不下：缓存图片（imageWait），恢复 _currentY，继续处理后续元素
+        // - 第二次放不下（imageWait 已有值）：强制换页（换页时 imageWait 会被放置），再处理本图片
+        if (_currentY - imageHeight < _marginBottom) {
+            match (_imageWait) {
+                case None =>
+                    // 第一次：缓存，恢复游标，延迟到下一页放置
+                    _currentY += f
+                    _imageWait = Some(image)
+                    return true
+                case Some(_) =>
+                    // 第二次：强制换页（newPage 内会放置 imageWait），恢复后重新应用 f
+                    _currentY += f
+                    newPage()
+                    _currentY -= f
+            }
+        }
+
+        // 嵌入 ICC Profile（若 JPEG 有内嵌 ICC Profile）
+        let iccRef = embedIccProfile(image)
+
         // 创建图片 XObject
-        let imageXObject = createImageXObject(image, rawData)
+        let imageXObject = createImageXObject(image, rawData, iccRef)
 
         // 添加到资源并获取名称
         let imageObjNum = _body.reserveObjectNumber()
@@ -969,7 +1013,6 @@ public class PdfWriter <: DocListener {
         let imageName = _resources.addXObject(imageRef)
 
         // 计算图片位置
-        let imageWidth = image.scaledWidth
         let pageWidth = _pageSize.width - _marginLeft - _marginRight
 
         let imageX = match (image.alignment) {
@@ -992,9 +1035,27 @@ public class PdfWriter <: DocListener {
     }
 
     /**
+     * 嵌入 ICC Profile 对象（若 JPEG 有内嵌 ICC Profile），返回其引用
+     */
+    private func embedIccProfile(image: Image): ?PdfIndirectReference {
+        match (image.iccProfile) {
+            case Some(iccData) =>
+                let iccStream = PdfStream()
+                iccStream.setContent(iccData)
+                // ICC Profile 需要注明颜色分量数（RGB = 3）
+                iccStream.put(PdfName("N"), PdfNumber(3))
+                let iccObjNum = _body.reserveObjectNumber()
+                let iccRef = _body.add(iccStream, iccObjNum)
+                Some(iccRef)
+            case None => None
+        }
+    }
+
+    /**
      * 创建图片 XObject
      */
-    private func createImageXObject(image: Image, rawData: Array<UInt8>): PdfStream {
+    private func createImageXObject(image: Image, rawData: Array<UInt8>,
+                                    iccRef: ?PdfIndirectReference): PdfStream {
         let stream = PdfStream()
         stream.put(PdfName.TYPE, PdfName.XOBJECT)
         stream.put(PdfName("Subtype"), PdfName("Image"))
@@ -1006,7 +1067,16 @@ public class PdfWriter <: DocListener {
             case ImageType.Jpeg =>
                 // JPEG 使用 DCTDecode 过滤器，可直接嵌入原始JPEG数据
                 stream.put(PdfName.FILTER, PdfName.DCTDECODE)
-                stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
+                // 优先使用内嵌 ICC Profile，否则回退到 DeviceRGB
+                match (iccRef) {
+                    case Some(ref) =>
+                        let csArray = PdfArray()
+                        csArray.add(PdfName("ICCBased"))
+                        csArray.add(ref)
+                        stream.put(PdfName("ColorSpace"), csArray)
+                    case None =>
+                        stream.put(PdfName("ColorSpace"), PdfName("DeviceRGB"))
+                }
                 stream.put(PdfName("BitsPerComponent"), PdfNumber(8))
                 stream.setContent(rawData)
             case ImageType.Png =>

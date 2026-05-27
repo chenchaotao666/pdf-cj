@@ -877,6 +877,39 @@ public class TrueTypeFont {
         let rightGlyphId = getGlyphId(rightChar)
         getKerning(leftGlyphId, rightGlyphId)
     }
+
+    /**
+     * 获取字形的 yMin（字形包围盒底部，字体单位，负值表示在基线以下）
+     * 用于计算实际字形 descender
+     */
+    public func getGlyphYMin(glyphId: UInt16): Int32 {
+        let locaEntry = match (tables.get("loca")) {
+            case Some(e) => e
+            case None => return 0
+        }
+        let glyfEntry = match (tables.get("glyf")) {
+            case Some(e) => e
+            case None => return 0
+        }
+
+        let glyfBase = glyfEntry.offset
+        var glyphOffset: Int64
+
+        if (indexToLocFormat == 0) {
+            let locaPos = locaEntry.offset + Int64(glyphId) * 2
+            if (locaPos + 4 > fontData.size) { return 0 }
+            glyphOffset = Int64(readUInt16(locaPos)) * 2
+        } else {
+            let locaPos = locaEntry.offset + Int64(glyphId) * 4
+            if (locaPos + 8 > fontData.size) { return 0 }
+            glyphOffset = Int64(readUInt32(locaPos))
+        }
+
+        let src = glyfBase + glyphOffset
+        // glyph header: numberOfContours(2), xMin(2), yMin(2), xMax(2), yMax(2)
+        if (src + 6 > fontData.size) { return 0 }
+        readInt16(src + 4)  // yMin
+    }
 }
 
 /**
