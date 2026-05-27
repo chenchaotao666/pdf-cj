@@ -9,7 +9,8 @@ package pdf_cj
 // 导出核心 API
 public import pdf_cj.api.{
     Document, Element, ElementType, ElementListener,
-    Chunk, Phrase, Paragraph, Chapter, HeaderFooter, DocListener
+    Chunk, Phrase, Paragraph, Chapter, HeaderFooter, DocListener,
+    FontSelector
 }
 
 // 导出核心写入器

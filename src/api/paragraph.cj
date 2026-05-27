@@ -68,6 +68,7 @@ public class Paragraph <: Phrase {
      */
     public init(chunk: Chunk) {
         super()
+        this._leading = chunk.font.size * DEFAULT_LEADING_MULTIPLIER
         add(chunk)
     }
 

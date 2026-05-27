@@ -218,14 +218,16 @@ public class BaseFont {
         // 标记字符串中的字形为已使用（用于子集化）
         markStringUsed(text)
 
-        // 如果是 TrueType 字体，使用精确的字形宽度
         match (ttfFont) {
             case Some(ttf) =>
                 return ttf.getStringWidth(text, fontSize)
             case None =>
-                // 简化实现：使用平均字符宽度
-                let avgCharWidth = getAverageCharWidth()
-                return Float32(text.size) * fontSize * avgCharWidth / 1000.0
+                // 使用标准 14 字体 AFM 逐字符宽度表
+                var total: Int32 = 0
+                for (r in text.runes()) {
+                    total += getBuiltInCharWidth(UInt32(r))
+                }
+                return Float32(total) * fontSize / 1000.0
         }
     }
 
@@ -237,7 +239,6 @@ public class BaseFont {
     public func getCharWidth(unicode: UInt32): Int32 {
         match (ttfFont) {
             case Some(ttf) =>
-                // 从 TrueType 字体获取精确宽度，转换为千分之一单位
                 let widthInFontUnits = ttf.getCharWidth(unicode)
                 let unitsPerEm = ttf.getUnitsPerEm()
                 if (unitsPerEm > 0) {
@@ -246,8 +247,202 @@ public class BaseFont {
                     return 0
                 }
             case None =>
-                // 对于标准字体，返回估算值
-                return Int32(getAverageCharWidth())
+                return getBuiltInCharWidth(unicode)
+        }
+    }
+
+    // 标准 14 字体 AFM 逐字符宽度（1/1000 em 单位，WinAnsi 编码 ASCII 段）
+    private func getBuiltInCharWidth(c: UInt32): Int32 {
+        if (c < 32u32) { return 0 }  // control characters have no advance width in standard fonts
+        match (fontName) {
+            case "Helvetica" | "Helvetica-Oblique" => afmHelvetica(c)
+            case "Helvetica-Bold" | "Helvetica-BoldOblique" => afmHelveticaBold(c)
+            case "Times-Roman" => afmTimesRoman(c)
+            case "Times-Bold" => afmTimesBold(c)
+            case "Times-Italic" => afmTimesItalic(c)
+            case "Times-BoldItalic" => afmTimesBoldItalic(c)
+            case "Courier" | "Courier-Bold" | "Courier-Oblique" | "Courier-BoldOblique" => 600
+            case _ => Int32(getAverageCharWidth())
+        }
+    }
+
+    private func afmHelvetica(c: UInt32): Int32 {
+        match (c) {
+            case 32u32 => 278; case 33u32 => 278; case 34u32 => 355; case 35u32 => 556
+            case 36u32 => 556; case 37u32 => 889; case 38u32 => 667; case 39u32 => 222
+            case 40u32 => 333; case 41u32 => 333; case 42u32 => 389; case 43u32 => 584
+            case 44u32 => 278; case 45u32 => 333; case 46u32 => 278; case 47u32 => 278
+            case 48u32 => 556; case 49u32 => 556; case 50u32 => 556; case 51u32 => 556
+            case 52u32 => 556; case 53u32 => 556; case 54u32 => 556; case 55u32 => 556
+            case 56u32 => 556; case 57u32 => 556; case 58u32 => 278; case 59u32 => 278
+            case 60u32 => 584; case 61u32 => 584; case 62u32 => 584; case 63u32 => 556
+            case 64u32 => 1015; case 65u32 => 667; case 66u32 => 667; case 67u32 => 722
+            case 68u32 => 722; case 69u32 => 667; case 70u32 => 611; case 71u32 => 778
+            case 72u32 => 722; case 73u32 => 278; case 74u32 => 500; case 75u32 => 667
+            case 76u32 => 556; case 77u32 => 833; case 78u32 => 722; case 79u32 => 778
+            case 80u32 => 667; case 81u32 => 778; case 82u32 => 722; case 83u32 => 667
+            case 84u32 => 611; case 85u32 => 722; case 86u32 => 667; case 87u32 => 944
+            case 88u32 => 667; case 89u32 => 667; case 90u32 => 611; case 91u32 => 278
+            case 92u32 => 278; case 93u32 => 278; case 94u32 => 469; case 95u32 => 556
+            case 96u32 => 222; case 97u32 => 556; case 98u32 => 556; case 99u32 => 500
+            case 100u32 => 556; case 101u32 => 556; case 102u32 => 278; case 103u32 => 556
+            case 104u32 => 556; case 105u32 => 222; case 106u32 => 222; case 107u32 => 500
+            case 108u32 => 222; case 109u32 => 833; case 110u32 => 556; case 111u32 => 556
+            case 112u32 => 556; case 113u32 => 556; case 114u32 => 333; case 115u32 => 500
+            case 116u32 => 278; case 117u32 => 556; case 118u32 => 500; case 119u32 => 722
+            case 120u32 => 500; case 121u32 => 500; case 122u32 => 500; case 123u32 => 334
+            case 124u32 => 260; case 125u32 => 334; case 126u32 => 584
+            case _ => 556
+        }
+    }
+
+    private func afmHelveticaBold(c: UInt32): Int32 {
+        match (c) {
+            case 32u32 => 278; case 33u32 => 333; case 34u32 => 474; case 35u32 => 556
+            case 36u32 => 556; case 37u32 => 889; case 38u32 => 722; case 39u32 => 278
+            case 40u32 => 333; case 41u32 => 333; case 42u32 => 389; case 43u32 => 584
+            case 44u32 => 278; case 45u32 => 333; case 46u32 => 278; case 47u32 => 278
+            case 48u32 => 556; case 49u32 => 556; case 50u32 => 556; case 51u32 => 556
+            case 52u32 => 556; case 53u32 => 556; case 54u32 => 556; case 55u32 => 556
+            case 56u32 => 556; case 57u32 => 556; case 58u32 => 333; case 59u32 => 333
+            case 60u32 => 584; case 61u32 => 584; case 62u32 => 584; case 63u32 => 611
+            case 64u32 => 975; case 65u32 => 722; case 66u32 => 722; case 67u32 => 722
+            case 68u32 => 722; case 69u32 => 667; case 70u32 => 611; case 71u32 => 778
+            case 72u32 => 722; case 73u32 => 278; case 74u32 => 556; case 75u32 => 722
+            case 76u32 => 611; case 77u32 => 833; case 78u32 => 722; case 79u32 => 778
+            case 80u32 => 667; case 81u32 => 778; case 82u32 => 722; case 83u32 => 667
+            case 84u32 => 611; case 85u32 => 722; case 86u32 => 667; case 87u32 => 944
+            case 88u32 => 667; case 89u32 => 667; case 90u32 => 611; case 91u32 => 333
+            case 92u32 => 278; case 93u32 => 333; case 94u32 => 584; case 95u32 => 556
+            case 96u32 => 278; case 97u32 => 556; case 98u32 => 611; case 99u32 => 556
+            case 100u32 => 611; case 101u32 => 556; case 102u32 => 333; case 103u32 => 611
+            case 104u32 => 611; case 105u32 => 278; case 106u32 => 278; case 107u32 => 556
+            case 108u32 => 278; case 109u32 => 889; case 110u32 => 611; case 111u32 => 611
+            case 112u32 => 611; case 113u32 => 611; case 114u32 => 389; case 115u32 => 556
+            case 116u32 => 333; case 117u32 => 611; case 118u32 => 556; case 119u32 => 778
+            case 120u32 => 556; case 121u32 => 556; case 122u32 => 500; case 123u32 => 389
+            case 124u32 => 280; case 125u32 => 389; case 126u32 => 584
+            case _ => 556
+        }
+    }
+
+    private func afmTimesRoman(c: UInt32): Int32 {
+        match (c) {
+            case 32u32 => 250; case 33u32 => 333; case 34u32 => 408; case 35u32 => 500
+            case 36u32 => 500; case 37u32 => 833; case 38u32 => 778; case 39u32 => 180
+            case 40u32 => 333; case 41u32 => 333; case 42u32 => 500; case 43u32 => 564
+            case 44u32 => 250; case 45u32 => 333; case 46u32 => 250; case 47u32 => 278
+            case 48u32 => 500; case 49u32 => 500; case 50u32 => 500; case 51u32 => 500
+            case 52u32 => 500; case 53u32 => 500; case 54u32 => 500; case 55u32 => 500
+            case 56u32 => 500; case 57u32 => 500; case 58u32 => 278; case 59u32 => 278
+            case 60u32 => 564; case 61u32 => 564; case 62u32 => 564; case 63u32 => 444
+            case 64u32 => 921; case 65u32 => 722; case 66u32 => 667; case 67u32 => 667
+            case 68u32 => 722; case 69u32 => 611; case 70u32 => 556; case 71u32 => 722
+            case 72u32 => 722; case 73u32 => 333; case 74u32 => 389; case 75u32 => 722
+            case 76u32 => 611; case 77u32 => 889; case 78u32 => 722; case 79u32 => 722
+            case 80u32 => 556; case 81u32 => 722; case 82u32 => 667; case 83u32 => 556
+            case 84u32 => 611; case 85u32 => 722; case 86u32 => 722; case 87u32 => 944
+            case 88u32 => 722; case 89u32 => 722; case 90u32 => 611; case 91u32 => 333
+            case 92u32 => 278; case 93u32 => 333; case 94u32 => 469; case 95u32 => 500
+            case 96u32 => 333; case 97u32 => 444; case 98u32 => 500; case 99u32 => 444
+            case 100u32 => 500; case 101u32 => 444; case 102u32 => 333; case 103u32 => 500
+            case 104u32 => 500; case 105u32 => 278; case 106u32 => 278; case 107u32 => 500
+            case 108u32 => 278; case 109u32 => 778; case 110u32 => 500; case 111u32 => 500
+            case 112u32 => 500; case 113u32 => 500; case 114u32 => 333; case 115u32 => 389
+            case 116u32 => 278; case 117u32 => 500; case 118u32 => 500; case 119u32 => 722
+            case 120u32 => 500; case 121u32 => 500; case 122u32 => 444; case 123u32 => 480
+            case 124u32 => 200; case 125u32 => 480; case 126u32 => 541
+            case _ => 500
+        }
+    }
+
+    private func afmTimesBold(c: UInt32): Int32 {
+        match (c) {
+            case 32u32 => 250; case 33u32 => 333; case 34u32 => 555; case 35u32 => 500
+            case 36u32 => 500; case 37u32 => 1000; case 38u32 => 833; case 39u32 => 278
+            case 40u32 => 333; case 41u32 => 333; case 42u32 => 500; case 43u32 => 570
+            case 44u32 => 250; case 45u32 => 333; case 46u32 => 250; case 47u32 => 278
+            case 48u32 => 500; case 49u32 => 500; case 50u32 => 500; case 51u32 => 500
+            case 52u32 => 500; case 53u32 => 500; case 54u32 => 500; case 55u32 => 500
+            case 56u32 => 500; case 57u32 => 500; case 58u32 => 333; case 59u32 => 333
+            case 60u32 => 570; case 61u32 => 570; case 62u32 => 570; case 63u32 => 500
+            case 64u32 => 930; case 65u32 => 722; case 66u32 => 667; case 67u32 => 722
+            case 68u32 => 722; case 69u32 => 667; case 70u32 => 611; case 71u32 => 778
+            case 72u32 => 778; case 73u32 => 389; case 74u32 => 500; case 75u32 => 778
+            case 76u32 => 667; case 77u32 => 944; case 78u32 => 722; case 79u32 => 778
+            case 80u32 => 611; case 81u32 => 778; case 82u32 => 722; case 83u32 => 556
+            case 84u32 => 667; case 85u32 => 722; case 86u32 => 722; case 87u32 => 1000
+            case 88u32 => 722; case 89u32 => 722; case 90u32 => 667; case 91u32 => 333
+            case 92u32 => 278; case 93u32 => 333; case 94u32 => 581; case 95u32 => 500
+            case 96u32 => 333; case 97u32 => 500; case 98u32 => 556; case 99u32 => 444
+            case 100u32 => 556; case 101u32 => 444; case 102u32 => 333; case 103u32 => 500
+            case 104u32 => 556; case 105u32 => 278; case 106u32 => 333; case 107u32 => 556
+            case 108u32 => 278; case 109u32 => 833; case 110u32 => 556; case 111u32 => 500
+            case 112u32 => 556; case 113u32 => 556; case 114u32 => 444; case 115u32 => 389
+            case 116u32 => 333; case 117u32 => 556; case 118u32 => 500; case 119u32 => 722
+            case 120u32 => 500; case 121u32 => 500; case 122u32 => 444; case 123u32 => 394
+            case 124u32 => 220; case 125u32 => 394; case 126u32 => 520
+            case _ => 500
+        }
+    }
+
+    private func afmTimesItalic(c: UInt32): Int32 {
+        match (c) {
+            case 32u32 => 250; case 33u32 => 333; case 34u32 => 420; case 35u32 => 500
+            case 36u32 => 500; case 37u32 => 833; case 38u32 => 778; case 39u32 => 214
+            case 40u32 => 333; case 41u32 => 333; case 42u32 => 500; case 43u32 => 675
+            case 44u32 => 250; case 45u32 => 333; case 46u32 => 250; case 47u32 => 278
+            case 48u32 => 500; case 49u32 => 500; case 50u32 => 500; case 51u32 => 500
+            case 52u32 => 500; case 53u32 => 500; case 54u32 => 500; case 55u32 => 500
+            case 56u32 => 500; case 57u32 => 500; case 58u32 => 333; case 59u32 => 333
+            case 60u32 => 675; case 61u32 => 675; case 62u32 => 675; case 63u32 => 500
+            case 64u32 => 920; case 65u32 => 611; case 66u32 => 611; case 67u32 => 667
+            case 68u32 => 722; case 69u32 => 611; case 70u32 => 611; case 71u32 => 722
+            case 72u32 => 722; case 73u32 => 333; case 74u32 => 444; case 75u32 => 667
+            case 76u32 => 556; case 77u32 => 833; case 78u32 => 667; case 79u32 => 722
+            case 80u32 => 611; case 81u32 => 722; case 82u32 => 611; case 83u32 => 500
+            case 84u32 => 556; case 85u32 => 722; case 86u32 => 611; case 87u32 => 833
+            case 88u32 => 611; case 89u32 => 556; case 90u32 => 556; case 91u32 => 389
+            case 92u32 => 278; case 93u32 => 389; case 94u32 => 422; case 95u32 => 500
+            case 96u32 => 333; case 97u32 => 500; case 98u32 => 500; case 99u32 => 444
+            case 100u32 => 500; case 101u32 => 444; case 102u32 => 278; case 103u32 => 500
+            case 104u32 => 500; case 105u32 => 278; case 106u32 => 278; case 107u32 => 444
+            case 108u32 => 278; case 109u32 => 722; case 110u32 => 500; case 111u32 => 500
+            case 112u32 => 500; case 113u32 => 500; case 114u32 => 389; case 115u32 => 389
+            case 116u32 => 278; case 117u32 => 500; case 118u32 => 444; case 119u32 => 667
+            case 120u32 => 444; case 121u32 => 444; case 122u32 => 389; case 123u32 => 400
+            case 124u32 => 275; case 125u32 => 400; case 126u32 => 541
+            case _ => 500
+        }
+    }
+
+    private func afmTimesBoldItalic(c: UInt32): Int32 {
+        match (c) {
+            case 32u32 => 250; case 33u32 => 389; case 34u32 => 555; case 35u32 => 500
+            case 36u32 => 500; case 37u32 => 833; case 38u32 => 778; case 39u32 => 278
+            case 40u32 => 333; case 41u32 => 333; case 42u32 => 500; case 43u32 => 570
+            case 44u32 => 250; case 45u32 => 333; case 46u32 => 250; case 47u32 => 278
+            case 48u32 => 500; case 49u32 => 500; case 50u32 => 500; case 51u32 => 500
+            case 52u32 => 500; case 53u32 => 500; case 54u32 => 500; case 55u32 => 500
+            case 56u32 => 500; case 57u32 => 500; case 58u32 => 333; case 59u32 => 333
+            case 60u32 => 570; case 61u32 => 570; case 62u32 => 570; case 63u32 => 500
+            case 64u32 => 832; case 65u32 => 667; case 66u32 => 667; case 67u32 => 667
+            case 68u32 => 722; case 69u32 => 667; case 70u32 => 611; case 71u32 => 722
+            case 72u32 => 778; case 73u32 => 389; case 74u32 => 500; case 75u32 => 667
+            case 76u32 => 611; case 77u32 => 889; case 78u32 => 722; case 79u32 => 722
+            case 80u32 => 611; case 81u32 => 722; case 82u32 => 667; case 83u32 => 556
+            case 84u32 => 611; case 85u32 => 722; case 86u32 => 667; case 87u32 => 889
+            case 88u32 => 667; case 89u32 => 611; case 90u32 => 611; case 91u32 => 333
+            case 92u32 => 278; case 93u32 => 333; case 94u32 => 570; case 95u32 => 500
+            case 96u32 => 333; case 97u32 => 500; case 98u32 => 500; case 99u32 => 444
+            case 100u32 => 500; case 101u32 => 444; case 102u32 => 333; case 103u32 => 500
+            case 104u32 => 556; case 105u32 => 278; case 106u32 => 278; case 107u32 => 500
+            case 108u32 => 278; case 109u32 => 778; case 110u32 => 556; case 111u32 => 500
+            case 112u32 => 500; case 113u32 => 500; case 114u32 => 389; case 115u32 => 389
+            case 116u32 => 278; case 117u32 => 556; case 118u32 => 444; case 119u32 => 667
+            case 120u32 => 444; case 121u32 => 444; case 122u32 => 389; case 123u32 => 348
+            case 124u32 => 220; case 125u32 => 348; case 126u32 => 570
+            case _ => 500
         }
     }
 
@@ -420,7 +615,9 @@ public class BaseFont {
     public func hasGlyph(unicode: UInt32): Bool {
         match (ttfFont) {
             case Some(ttf) => ttf.hasGlyph(unicode)
-            case None => false
+            case None =>
+                // 内置 Type1 字体覆盖 WinAnsi/Latin 范围（Unicode 32-255）
+                unicode >= 32u32 && unicode <= 255u32
         }
     }
 

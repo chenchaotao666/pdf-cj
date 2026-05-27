@@ -103,12 +103,6 @@ public class FontFactory {
      * 根据基础字体名和样式解析实际字体名
      */
     private static func resolveFont(fontName: String, style: FontStyle): String {
-        // 如果已经是完整名称，直接返回
-        if (fontName.contains("-")) {
-            return fontName
-        }
-
-        // 根据基础名称和样式组合
         match (fontName) {
             case "Helvetica" => match (style) {
                 case Bold => HELVETICA_BOLD

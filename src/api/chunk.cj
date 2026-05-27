@@ -19,10 +19,12 @@ public class Chunk <: Element {
     private var _underline: Bool = false
     private var _strikethrough: Bool = false
     private var _background: ?Color = None
+    private var _underlineList: ?ArrayList<Array<Float32>> = None  // custom (thickness, yPos) specs
+    private var _bgPadding: ?Array<Float32> = None                 // [extraLeft, extraBottom, extraRight, extraTop]
 
     // 预定义常量
     public static let NEWLINE = Chunk("\n")
-    public static let NEWPAGE = Chunk("")  // 用于触发分页
+    public static let NEWPAGE = Chunk("NEWPAGE")  // matches OpenPDF behavior: renders "NEWPAGE" text inline
     public static let SPACETABBING = Chunk(" \t")
     public static let TAB = Chunk("\t")
 
@@ -50,6 +52,8 @@ public class Chunk <: Element {
     public init(content: String, font: Font) {
         this._content = content
         this._font = font
+        this._underline = font.isUnderlined()
+        this._strikethrough = font.isStrikethru()
     }
 
     /**
@@ -66,6 +70,8 @@ public class Chunk <: Element {
     public init(c: Rune, font: Font) {
         this._content = String([c])
         this._font = font
+        this._underline = font.isUnderlined()
+        this._strikethrough = font.isStrikethru()
     }
 
     /**
@@ -126,11 +132,32 @@ public class Chunk <: Element {
     }
 
     /**
-     * 设置下划线
+     * 设置下划线（使用默认粗细和位置）
      */
     public func setUnderline(): Chunk {
         this._underline = true
         this
+    }
+
+    /**
+     * 设置下划线（自定义粗细和 Y 偏移，对标 OpenPDF Chunk.setUnderline(thickness, yPos)）
+     * yPos 为相对基线的偏移（负值 = 基线以下，正值 = 基线以上）
+     */
+    public func setUnderline(thickness: Float32, yPos: Float32): Chunk {
+        if (_underlineList.isNone()) {
+            _underlineList = Some(ArrayList<Array<Float32>>())
+        }
+        match (_underlineList) {
+            case Some(list) =>
+                let spec: Array<Float32> = [thickness, yPos]
+                list.add(spec)
+            case None => ()
+        }
+        this
+    }
+
+    public prop underlineList: ?ArrayList<Array<Float32>> {
+        get() { _underlineList }
     }
 
     /**
@@ -142,11 +169,25 @@ public class Chunk <: Element {
     }
 
     /**
-     * 设置背景色
+     * 设置背景色（无额外边距，对标 OpenPDF setBackground(color, 0,0,0,0)）
      */
     public func setBackground(color: Color): Chunk {
         this._background = Some(color)
         this
+    }
+
+    /**
+     * 设置背景色（带额外边距，对标 OpenPDF setBackground(color, extraLeft, extraBottom, extraRight, extraTop)）
+     */
+    public func setBackground(color: Color, extraLeft: Float32, extraBottom: Float32, extraRight: Float32, extraTop: Float32): Chunk {
+        this._background = Some(color)
+        let pad: Array<Float32> = [extraLeft, extraBottom, extraRight, extraTop]
+        this._bgPadding = Some(pad)
+        this
+    }
+
+    public prop bgPadding: ?Array<Float32> {
+        get() { _bgPadding }
     }
 
     /**
@@ -170,6 +211,11 @@ public class Chunk <: Element {
     public func setAnchorURL(url: String): Chunk {
         setAttribute(ANCHOR, url)
         this
+    }
+
+    /** 对标 OpenPDF Chunk.setAnchor(String) 的别名 */
+    public func setAnchor(url: String): Chunk {
+        setAnchorURL(url)
     }
 
     /**

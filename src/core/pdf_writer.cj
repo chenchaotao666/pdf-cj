@@ -735,6 +735,48 @@ public class PdfWriter <: DocListener {
             var segWidth: Float32 = 0.0
 
             for (r in chunk.content.runes()) {
+                // \n triggers an explicit line break
+                if (r == r'\n') {
+                    if (!segText.isEmpty()) {
+                        let seg = Chunk(segText, font)
+                        match (chunk.color) {
+                            case Some(c) => _ = seg.setColor(c)
+                            case None => ()
+                        }
+                        if (chunk.underline) { _ = seg.setUnderline() }
+                        if (chunk.strikethrough) { _ = seg.setStrikethrough() }
+                        match (chunk.underlineList) {
+                            case Some(specs) =>
+                                for (si in 0..specs.size) {
+                                    let s = specs[si]
+                                    _ = seg.setUnderline(s[0], s[1])
+                                }
+                            case None => ()
+                        }
+                        match (chunk.background) {
+                            case Some(bg) =>
+                                match (chunk.bgPadding) {
+                                    case Some(pad) => _ = seg.setBackground(bg, pad[0], pad[1], pad[2], pad[3])
+                                    case None => _ = seg.setBackground(bg)
+                                }
+                            case None => ()
+                        }
+                        match (chunk.getAttribute(Chunk.ANCHOR)) {
+                            case Some(url) => _ = seg.setAnchorURL(url)
+                            case None => ()
+                        }
+                        currentLine.add(seg)
+                        lineWidth += segWidth
+                        segText = ""
+                        segWidth = 0.0
+                    }
+                    allLines.add(currentLine)
+                    currentLine = ArrayList<Chunk>()
+                    lineWidth = 0.0
+                    isFirstLine = false
+                    continue
+                }
+
                 let charStr = String([r])
                 let charWidth = baseFont.getWidthPoint(charStr, font.size)
                 let availWidth: Float32 = if (isFirstLine) {
@@ -753,8 +795,20 @@ public class PdfWriter <: DocListener {
                         }
                         if (chunk.underline) { _ = seg.setUnderline() }
                         if (chunk.strikethrough) { _ = seg.setStrikethrough() }
+                        match (chunk.underlineList) {
+                            case Some(specs) =>
+                                for (si in 0..specs.size) {
+                                    let s = specs[si]
+                                    _ = seg.setUnderline(s[0], s[1])
+                                }
+                            case None => ()
+                        }
                         match (chunk.background) {
-                            case Some(bg) => _ = seg.setBackground(bg)
+                            case Some(bg) =>
+                                match (chunk.bgPadding) {
+                                    case Some(pad) => _ = seg.setBackground(bg, pad[0], pad[1], pad[2], pad[3])
+                                    case None => _ = seg.setBackground(bg)
+                                }
                             case None => ()
                         }
                         match (chunk.getAttribute(Chunk.ANCHOR)) {
@@ -785,8 +839,20 @@ public class PdfWriter <: DocListener {
                 }
                 if (chunk.underline) { _ = seg.setUnderline() }
                 if (chunk.strikethrough) { _ = seg.setStrikethrough() }
+                match (chunk.underlineList) {
+                    case Some(specs) =>
+                        for (si in 0..specs.size) {
+                            let s = specs[si]
+                            _ = seg.setUnderline(s[0], s[1])
+                        }
+                    case None => ()
+                }
                 match (chunk.background) {
-                    case Some(bg) => _ = seg.setBackground(bg)
+                    case Some(bg) =>
+                        match (chunk.bgPadding) {
+                            case Some(pad) => _ = seg.setBackground(bg, pad[0], pad[1], pad[2], pad[3])
+                            case None => _ = seg.setBackground(bg)
+                        }
                     case None => ()
                 }
                 match (chunk.getAttribute(Chunk.ANCHOR)) {
@@ -816,12 +882,13 @@ public class PdfWriter <: DocListener {
         // ── Pass 2: 渲染每行，按对齐方式计算 x 起点 ──
         // 与 OpenPDF 对齐：先减 leading（下移一行高度），再绘制 baseline
         for (i in 0..allLines.size) {
+            let line = allLines[i]
+
             _currentY -= para.leading
             if (_currentY < _marginBottom) {
                 newPage()
             }
 
-            let line = allLines[i]
             let lineLeftX: Float32 = if (i == 0) { firstLineLeftX } else { leftX }
 
             // 计算本行总宽度
@@ -1822,12 +1889,18 @@ public class PdfWriter <: DocListener {
         match (chunk.background) {
             case Some(bgColor) =>
                 let textWidth = baseFont.getWidthPoint(chunk.content, font.size)
-                // OpenPDF: rectangle(x-1, y-size*0.2, width+2, size+2)
-                let bgY = y - font.size * 0.2
-                let bgH = font.size + 2.0
+                // 使用 bgPadding（对标 OpenPDF setBackground 的 extra 参数）
+                let (eL, eB, eR, eT): (Float32, Float32, Float32, Float32) = match (chunk.bgPadding) {
+                    case Some(p) => (p[0], p[1], p[2], p[3])
+                    case None => (0.0, 0.0, 0.0, 0.0)
+                }
+                let bgX = x - eL
+                let bgY = y - font.size * 0.2 - eB
+                let bgW = textWidth + eL + eR
+                let bgH = font.size + eB + eT
                 getContent().saveState()
                 getContent().setColorFill(bgColor)
-                getContent().rectangle(x - 1.0, bgY, textWidth + 2.0, bgH)
+                getContent().rectangle(bgX, bgY, bgW, bgH)
                 getContent().fill()
                 getContent().restoreState()
             case None => ()
@@ -1855,9 +1928,13 @@ public class PdfWriter <: DocListener {
             getContent().setColorFill(Color.BLACK)
         }
 
-        // 粗体：使用 PDF 文本渲染模式 2（fill+stroke）模拟，与 OpenPDF 行为一致
-        if (font.isBold()) {
-            // 描边颜色与填充色保持一致
+        // 粗体模拟：若 baseFont 本身已是 Bold 变体（Courier-Bold / Helvetica-Bold 等），
+        // 说明 bold 已由字体字形提供，无需 fill+stroke，否则双重加粗。
+        // TrueType 字体无原生 bold 变体，始终模拟。
+        let bfName = baseFont.name
+        let isAlreadyBold = bfName.contains("Bold")
+        let needsBoldSim = font.isBold() && (baseFont.isTrueType() || !isAlreadyBold)
+        if (needsBoldSim) {
             match (chunk.color) {
                 case Some(color) => getContent().setColorStroke(color)
                 case None => match (font.color) {
@@ -1869,8 +1946,12 @@ public class PdfWriter <: DocListener {
             getContent().setLineWidth(font.size / 30.0)
         }
 
-        // 设置文本矩阵，如果是斜体则应用倾斜变换
-        if (font.isItalic()) {
+        // 斜体模拟：若 baseFont 本身已是 Italic/Oblique 变体（Times-Italic 等），
+        // 说明斜体已由字体字形提供，无需剪切矩阵，否则双重倾斜。
+        // TrueType 字体无原生 italic 变体，始终模拟。
+        let isAlreadyItalic = bfName.contains("Italic") || bfName.contains("Oblique")
+        let needsItalicSim = font.isItalic() && (baseFont.isTrueType() || !isAlreadyItalic)
+        if (needsItalicSim) {
             // tan(12°) ≈ 0.21256，与 OpenPDF PdfWriter.ITALIC_ANGLE 一致
             getContent().setTextMatrix(1.0, 0.0, 0.21256, 1.0, x, y)
         } else {
@@ -1896,12 +1977,12 @@ public class PdfWriter <: DocListener {
         getContent().endText()
 
         // ── 下划线 / 删除线：在文本之后绘制线条 ──
-        if (chunk.underline || chunk.strikethrough) {
+        let hasCustomUnderlines = match (chunk.underlineList) {
+            case Some(list) => list.size > 0
+            case None => false
+        }
+        if (chunk.underline || chunk.strikethrough || hasCustomUnderlines) {
             let textWidth = baseFont.getWidthPoint(chunk.content, font.size)
-            var lineThickness = font.size * 0.05
-            if (lineThickness < 0.5) {
-                lineThickness = 0.5
-            }
             // 线条颜色：优先 chunk 颜色，然后 font 颜色，最后黑色
             let lineColor = match (chunk.color) {
                 case Some(c) => c
@@ -1912,16 +1993,29 @@ public class PdfWriter <: DocListener {
             }
             getContent().saveState()
             getContent().setColorStroke(lineColor)
-            getContent().setLineWidth(lineThickness)
+            // 默认下划线：thickness = size/15，位置 = baseline - size/3
             if (chunk.underline) {
-                // OpenPDF: fixed −2pt below baseline
-                let lineY = y - 2.0
+                getContent().setLineWidth(font.size / 15.0)
+                let lineY = y - font.size / 3.0
                 getContent().moveTo(x, lineY)
                 getContent().lineTo(x + textWidth, lineY)
                 getContent().stroke()
             }
+            // 自定义下划线规格（setUnderline(thickness, yPos)，可多次调用）
+            match (chunk.underlineList) {
+                case Some(specs) =>
+                    for (i in 0..specs.size) {
+                        let spec = specs[i]
+                        getContent().setLineWidth(spec[0])
+                        getContent().moveTo(x, y + spec[1])
+                        getContent().lineTo(x + textWidth, y + spec[1])
+                        getContent().stroke()
+                    }
+                case None => ()
+            }
+            // 删除线：thickness = size/15，位置 = baseline + size/3
             if (chunk.strikethrough) {
-                // OpenPDF: fontSize/3 above baseline
+                getContent().setLineWidth(font.size / 15.0)
                 let lineY = y + font.size / 3.0
                 getContent().moveTo(x, lineY)
                 getContent().lineTo(x + textWidth, lineY)
