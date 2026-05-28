@@ -253,7 +253,7 @@ public class BaseFont {
 
     // 标准 14 字体 AFM 逐字符宽度（1/1000 em 单位，WinAnsi 编码 ASCII 段）
     private func getBuiltInCharWidth(c: UInt32): Int32 {
-        if (c < 32u32) { return 0 }  // control characters have no advance width in standard fonts
+        if (c < 32u32 && c != 9u32) { return 0 }  // control chars have no advance width except tab (9)
         match (fontName) {
             case "Helvetica" | "Helvetica-Oblique" => afmHelvetica(c)
             case "Helvetica-Bold" | "Helvetica-BoldOblique" => afmHelveticaBold(c)
@@ -268,6 +268,17 @@ public class BaseFont {
 
     private func afmHelvetica(c: UInt32): Int32 {
         match (c) {
+            case 9u32 => 278
+            // WinAnsi extended (Unicode codepoints for chars above U+007F)
+            case 8211u32 => 556   // U+2013 en dash
+            case 8212u32 => 1000  // U+2014 em dash
+            case 8216u32 => 278   // U+2018 left single quotation mark
+            case 8217u32 => 278   // U+2019 right single quotation mark
+            case 8220u32 => 500   // U+201C left double quotation mark
+            case 8221u32 => 500   // U+201D right double quotation mark
+            case 8226u32 => 500   // U+2022 bullet
+            case 8230u32 => 1000  // U+2026 horizontal ellipsis
+            case 8364u32 => 556   // U+20AC euro sign
             case 32u32 => 278; case 33u32 => 278; case 34u32 => 355; case 35u32 => 556
             case 36u32 => 556; case 37u32 => 889; case 38u32 => 667; case 39u32 => 222
             case 40u32 => 333; case 41u32 => 333; case 42u32 => 389; case 43u32 => 584
@@ -298,6 +309,17 @@ public class BaseFont {
 
     private func afmHelveticaBold(c: UInt32): Int32 {
         match (c) {
+            case 9u32 => 278
+            // WinAnsi extended (Unicode codepoints for chars above U+007F)
+            case 8211u32 => 556   // U+2013 en dash
+            case 8212u32 => 1000  // U+2014 em dash
+            case 8216u32 => 278   // U+2018 left single quotation mark
+            case 8217u32 => 278   // U+2019 right single quotation mark
+            case 8220u32 => 556   // U+201C left double quotation mark
+            case 8221u32 => 556   // U+201D right double quotation mark
+            case 8226u32 => 500   // U+2022 bullet
+            case 8230u32 => 1000  // U+2026 horizontal ellipsis
+            case 8364u32 => 556   // U+20AC euro sign
             case 32u32 => 278; case 33u32 => 333; case 34u32 => 474; case 35u32 => 556
             case 36u32 => 556; case 37u32 => 889; case 38u32 => 722; case 39u32 => 278
             case 40u32 => 333; case 41u32 => 333; case 42u32 => 389; case 43u32 => 584

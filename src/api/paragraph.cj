@@ -226,6 +226,13 @@ public class Paragraph <: Phrase {
     }
 
     /**
+     * 设置固定行距 + 倍数行距（对标 OpenPDF Paragraph.setLeading(fixedLeading, multipliedLeading)）
+     */
+    public func setLeading(fixedLeading: Float32, multiplier: Float32): Unit {
+        this._leading = fixedLeading + _font.size * multiplier
+    }
+
+    /**
      * 设置倍数行距
      */
     public func setMultipliedLeading(multiplier: Float32): Unit {

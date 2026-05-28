@@ -26,7 +26,7 @@ func s06_anchor(): Unit {
         title.setSpacingAfter(20.0)
         doc.add(title)
 
-        let linkFont = Font(helvBf, 12.0, FontStyle.Normal, Color(0, 0, 200))
+        let linkFont = Font(helvBf, 12.0, FontStyle.Underline, Color(0, 0, 255))
 
         // 1. Basic external URL anchor
         let a1 = Anchor("1. OpenPDF GitHub Page", linkFont)
@@ -81,7 +81,7 @@ func s06_anchor(): Unit {
         doc.add(Paragraph(a7))
 
         // 8. CJK anchor
-        let cjkLink = Font(cjkBf, 13.0, FontStyle.Normal, Color(0, 0, 200))
+        let cjkLink = Font(cjkBf, 13.0, FontStyle.Underline, Color(0, 0, 255))
         let a8 = Anchor("8. 中文链接：点击访问百度", cjkLink)
         a8.setReference("https://www.baidu.com")
         doc.add(Paragraph(a8))

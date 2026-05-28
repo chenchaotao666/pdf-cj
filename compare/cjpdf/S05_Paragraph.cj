@@ -49,10 +49,18 @@ func s05_paragraph(): Unit {
         let p3 = Paragraph("1c. Paragraph(String, Font) constructor", Font(helvBf, 13.0))
         doc.add(p3)
 
-        // Paragraph(Phrase)
-        let phrase = Phrase("1d. Paragraph(Phrase) constructor", Font(helvBf, 12.0))
-        let p4 = Paragraph(phrase)
+        // Paragraph(float leading, String)
+        let p4 = Paragraph(22.0, "1d. Paragraph(leading=22, String)")
         doc.add(p4)
+
+        // Paragraph(float leading, String, Font)
+        let p5 = Paragraph(20.0, "1e. Paragraph(leading=20, String, Font)", Font(helvBf, 12.0))
+        doc.add(p5)
+
+        // Paragraph(Phrase)
+        let phrase = Phrase("1f. Paragraph(Phrase) constructor", Font(helvBf, 12.0))
+        let p6 = Paragraph(phrase)
+        doc.add(p6)
 
         // 2. Alignments
         doc.add(Paragraph("--- Alignments ---", Font(helvBf, 12.0)))
@@ -94,8 +102,8 @@ func s05_paragraph(): Unit {
         doc.add(fixedLeading)
 
         var multipliedLeading = Paragraph(_s05_LOREM, Font(helvBf, 11.0))
-        multipliedLeading.setMultipliedLeading(1.8)
-        doc.add(Paragraph("setMultipliedLeading(1.8):", Font(helvBf, 10.0)))
+        multipliedLeading.setLeading(0.0, 1.8)
+        doc.add(Paragraph("setLeading(0, 1.8) multiplied:", Font(helvBf, 10.0)))
         doc.add(multipliedLeading)
 
         // 4. Spacing before/after
@@ -142,7 +150,8 @@ func s05_paragraph(): Unit {
         var mixed = Paragraph()
         _ = mixed.add(Chunk("10. Mixed: Latin text ", Font(helvBf, 12.0)))
         _ = mixed.add(Chunk("中文 ", Font(cjkBf, 12.0)))
-        let a = Anchor("link", Font(helvBf, 12.0, FontStyle.Normal, Color(0, 0, 200)))
+        _ = mixed.add(Phrase("with Anchor", Font(helvBf, 12.0, FontStyle.Underline, Color(0, 0, 255))))
+        let a = Anchor(" [link]", Font(helvBf, 12.0, FontStyle.Underline, Color(0, 0, 255)))
         a.setReference("https://example.com")
         _ = mixed.add(a)
         doc.add(mixed)

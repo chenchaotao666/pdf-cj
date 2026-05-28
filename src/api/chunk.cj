@@ -266,6 +266,16 @@ public class Chunk <: Element {
     }
 
     /**
+     * 是否有特殊属性（ANCHOR、LOCALGOTO 等）
+     */
+    public func hasAttributes(): Bool {
+        match (attributes) {
+            case Some(attrs) => !attrs.isEmpty()
+            case None => false
+        }
+    }
+
+    /**
      * 是否为空
      */
     public func isEmpty(): Bool {

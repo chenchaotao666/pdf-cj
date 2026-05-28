@@ -113,7 +113,46 @@ public open class Phrase <: Element {
     }
 
     private func addChunk(element: Element): Bool {
+        // Match OpenPDF Phrase.addChunk: merge adjacent same-font chunks with no attributes
+        match (element) {
+            case newChunk: Chunk =>
+                if (!newChunk.hasAttributes() && !newChunk.content.isEmpty() && !chunks.isEmpty()) {
+                    match (chunks[chunks.size - 1]) {
+                        case lastChunk: Chunk =>
+                            if (!lastChunk.hasAttributes() && !lastChunk.content.isEmpty()
+                                    && fontsMatch(lastChunk.font, newChunk.font)) {
+                                _ = lastChunk.append(newChunk.content)
+                                return true
+                            }
+                        case _ => ()
+                    }
+                }
+            case _ => ()
+        }
         chunks.add(element)
+        true
+    }
+
+    private func fontsMatch(f1: Font, f2: Font): Bool {
+        if (f1.size != f2.size || f1.style != f2.style || f1.family != f2.family) {
+            return false
+        }
+        match ((f1.color, f2.color)) {
+            case (None, None) => ()
+            case (Some(c1), Some(c2)) =>
+                if (c1.red != c2.red || c1.green != c2.green || c1.blue != c2.blue) {
+                    return false
+                }
+            case _ => return false
+        }
+        match ((f1.baseFont, f2.baseFont)) {
+            case (None, None) => ()
+            case (Some(bf1), Some(bf2)) =>
+                if (bf1.name != bf2.name || bf1.fontEncoding != bf2.fontEncoding) {
+                    return false
+                }
+            case _ => return false
+        }
         true
     }
 

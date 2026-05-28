@@ -218,8 +218,10 @@ func s07_table(): Unit {
             t3.addCell(s07DataCell("${i}"))
             t3.addCell(s07DataCell("Item ${i}"))
             t3.addCell(s07DataCell("Description for row ${i}"))
-            let val_ = Float64(i) * 9.99
-            t3.addCell(s07DataCell("$${val_}"))
+            let cents = i * 999
+            let rem = cents % 100
+            let valStr = if (rem < 10) { "${cents / 100}.0${rem}" } else { "${cents / 100}.${rem}" }
+            t3.addCell(s07DataCell("$${valStr}"))
             let idx = i % 4
             let statusCell = s07DataCell(statuses[idx])
             statusCell.setBackgroundColor(statusColors[idx])
@@ -228,23 +230,24 @@ func s07_table(): Unit {
         }
         doc.add(t3)
 
-        // ---- Table 4: CJK content ----
-        doc.add(Paragraph("Table 4: CJK Content Table", Font(helvBf, 13.0, FontStyle.Bold)))
+        // ---- Table 4: Total Width Locked + disableBorderSide ----
+        doc.add(Paragraph("Table 4: Total Width Locked + disableBorderSide", Font(helvBf, 13.0, FontStyle.Bold)))
         let t4 = PdfPTable(3)
-        t4.setWidthPercentage(90.0)
-        t4.setWidths([Float32(1.0), Float32(2.0), Float32(1.0)])
+        t4.setTotalWidth(350.0)
+        t4.setLockedWidth(true)
         t4.setSpacingBefore(8.0)
         t4.setSpacingAfter(16.0)
 
-        let cjkHeaders = ["编号", "名称", "状态"]
-        for (h in cjkHeaders) {
+        for (h in ["Col 1", "Col 2", "Col 3"]) {
             t4.addCell(s07HdrCell(h))
         }
 
-        let cjkData = [["1", "仓颉语言", "正常"], ["2", "PDF库", "测试中"], ["3", "文档生成", "完成"]]
-        for (row in cjkData) {
-            for (cell in row) {
-                t4.addCell(PdfPCell(Phrase(cell, Font(cjkBf, 11.0))))
+        for (row in 0..3) {
+            for (col in 0..3) {
+                let cell = s07DataCell("R${row + 1}C${col + 1}")
+                if (col == 0) { cell.disableBorderSide(Border.LEFT) }
+                if (col == 2) { cell.disableBorderSide(Border.RIGHT) }
+                t4.addCell(cell)
             }
         }
         doc.add(t4)

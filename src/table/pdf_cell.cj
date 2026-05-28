@@ -392,9 +392,13 @@ public class PdfPCell <: Element {
 
         match (_phrase) {
             case Some(p) =>
-                // 与 OpenPDF 一致：单行高度 = font.size，多行高度 = lines * leading
                 let fontSize = p.font.size
-                height += estimateWrappedHeight(p.getWidth(), fontSize, p.leading, availW)
+                // noWrap=true: always single line, no wrap estimation
+                if (_noWrap) {
+                    height += fontSize
+                } else {
+                    height += estimateWrappedHeight(p.getWidth(), fontSize, p.leading, availW)
+                }
             case None => ()
         }
 

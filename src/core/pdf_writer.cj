@@ -701,6 +701,38 @@ public class PdfWriter <: DocListener {
         }
     }
 
+    // Build a segment Chunk from segText with all formatting copied from the template chunk
+    private func buildSegChunk(segText: String, template: Chunk): Chunk {
+        let seg = Chunk(segText, template.font)
+        match (template.color) {
+            case Some(c) => _ = seg.setColor(c)
+            case None => ()
+        }
+        if (template.underline) { _ = seg.setUnderline() }
+        if (template.strikethrough) { _ = seg.setStrikethrough() }
+        match (template.underlineList) {
+            case Some(specs) =>
+                for (si in 0..specs.size) {
+                    let s = specs[si]
+                    _ = seg.setUnderline(s[0], s[1])
+                }
+            case None => ()
+        }
+        match (template.background) {
+            case Some(bg) =>
+                match (template.bgPadding) {
+                    case Some(pad) => _ = seg.setBackground(bg, pad[0], pad[1], pad[2], pad[3])
+                    case None => _ = seg.setBackground(bg)
+                }
+            case None => ()
+        }
+        match (template.getAttribute(Chunk.ANCHOR)) {
+            case Some(url) => _ = seg.setAnchorURL(url)
+            case None => ()
+        }
+        seg
+    }
+
     private func processParagraph(para: Paragraph): Bool {
         // 重置两端对齐的跨行复用参数（每个新段落独立计算）
         _prevJustifyTc = 0.0
@@ -733,39 +765,16 @@ public class PdfWriter <: DocListener {
             let baseFont = font.getCalculatedBaseFont()
             var segText = ""
             var segWidth: Float32 = 0.0
+            // Word-boundary state: snapshot of segText/segWidth at the last space seen
+            var lastBreakText = ""
+            var lastBreakWidth: Float32 = 0.0
+            var hasBreak = false
 
             for (r in chunk.content.runes()) {
                 // \n triggers an explicit line break
                 if (r == r'\n') {
                     if (!segText.isEmpty()) {
-                        let seg = Chunk(segText, font)
-                        match (chunk.color) {
-                            case Some(c) => _ = seg.setColor(c)
-                            case None => ()
-                        }
-                        if (chunk.underline) { _ = seg.setUnderline() }
-                        if (chunk.strikethrough) { _ = seg.setStrikethrough() }
-                        match (chunk.underlineList) {
-                            case Some(specs) =>
-                                for (si in 0..specs.size) {
-                                    let s = specs[si]
-                                    _ = seg.setUnderline(s[0], s[1])
-                                }
-                            case None => ()
-                        }
-                        match (chunk.background) {
-                            case Some(bg) =>
-                                match (chunk.bgPadding) {
-                                    case Some(pad) => _ = seg.setBackground(bg, pad[0], pad[1], pad[2], pad[3])
-                                    case None => _ = seg.setBackground(bg)
-                                }
-                            case None => ()
-                        }
-                        match (chunk.getAttribute(Chunk.ANCHOR)) {
-                            case Some(url) => _ = seg.setAnchorURL(url)
-                            case None => ()
-                        }
-                        currentLine.add(seg)
+                        currentLine.add(buildSegChunk(segText, chunk))
                         lineWidth += segWidth
                         segText = ""
                         segWidth = 0.0
@@ -774,6 +783,9 @@ public class PdfWriter <: DocListener {
                     currentLine = ArrayList<Chunk>()
                     lineWidth = 0.0
                     isFirstLine = false
+                    lastBreakText = ""
+                    lastBreakWidth = 0.0
+                    hasBreak = false
                     continue
                 }
 
@@ -786,80 +798,62 @@ public class PdfWriter <: DocListener {
                 }
 
                 if (lineWidth + segWidth + charWidth > availWidth && lineWidth + segWidth > 0.0) {
-                    // 当前段落片段非空，加入本行
-                    if (!segText.isEmpty()) {
-                        let seg = Chunk(segText, font)
-                        match (chunk.color) {
-                            case Some(c) => _ = seg.setColor(c)
-                            case None => ()
+                    // Overflow: prefer breaking at word boundary (last space in segText)
+                    if (hasBreak) {
+                        // Break at last space: put everything up to (and including) the space on this line
+                        let afterBreak = segText[lastBreakText.size..]
+                        if (!lastBreakText.isEmpty()) {
+                            currentLine.add(buildSegChunk(lastBreakText, chunk))
                         }
-                        if (chunk.underline) { _ = seg.setUnderline() }
-                        if (chunk.strikethrough) { _ = seg.setStrikethrough() }
-                        match (chunk.underlineList) {
-                            case Some(specs) =>
-                                for (si in 0..specs.size) {
-                                    let s = specs[si]
-                                    _ = seg.setUnderline(s[0], s[1])
-                                }
-                            case None => ()
+                        allLines.add(currentLine)
+                        currentLine = ArrayList<Chunk>()
+                        lineWidth = 0.0
+                        isFirstLine = false
+                        // Next line: the word fragment after the space + the overflow char
+                        segText = afterBreak + charStr
+                        segWidth = segWidth - lastBreakWidth + charWidth
+                        lastBreakText = ""
+                        lastBreakWidth = 0.0
+                        hasBreak = false
+                    } else if (!currentLine.isEmpty() || lineWidth > 0.0) {
+                        // No space in segText but line has prior content: push whole word to next line
+                        allLines.add(currentLine)
+                        currentLine = ArrayList<Chunk>()
+                        lineWidth = 0.0
+                        isFirstLine = false
+                        segText = segText + charStr
+                        segWidth = segWidth + charWidth
+                        // hasBreak stays false; no space in this word yet
+                    } else {
+                        // Nothing on current line at all: must break mid-word
+                        if (!segText.isEmpty()) {
+                            currentLine.add(buildSegChunk(segText, chunk))
                         }
-                        match (chunk.background) {
-                            case Some(bg) =>
-                                match (chunk.bgPadding) {
-                                    case Some(pad) => _ = seg.setBackground(bg, pad[0], pad[1], pad[2], pad[3])
-                                    case None => _ = seg.setBackground(bg)
-                                }
-                            case None => ()
-                        }
-                        match (chunk.getAttribute(Chunk.ANCHOR)) {
-                            case Some(url) => _ = seg.setAnchorURL(url)
-                            case None => ()
-                        }
-                        currentLine.add(seg)
+                        allLines.add(currentLine)
+                        currentLine = ArrayList<Chunk>()
+                        lineWidth = 0.0
+                        isFirstLine = false
+                        segText = charStr
+                        segWidth = charWidth
+                        lastBreakText = ""
+                        lastBreakWidth = 0.0
+                        hasBreak = false
                     }
-                    // 保存本行，开启新行
-                    allLines.add(currentLine)
-                    currentLine = ArrayList<Chunk>()
-                    lineWidth = 0.0
-                    isFirstLine = false
-                    segText = charStr
-                    segWidth = charWidth
                 } else {
                     segText += charStr
                     segWidth += charWidth
+                    // Track the last space as a potential line-break point
+                    if (r == r' ') {
+                        lastBreakText = segText
+                        lastBreakWidth = segWidth
+                        hasBreak = true
+                    }
                 }
             }
 
             // chunk 遍历完，将剩余段落片段加入当前行
             if (!segText.isEmpty()) {
-                let seg = Chunk(segText, font)
-                match (chunk.color) {
-                    case Some(c) => _ = seg.setColor(c)
-                    case None => ()
-                }
-                if (chunk.underline) { _ = seg.setUnderline() }
-                if (chunk.strikethrough) { _ = seg.setStrikethrough() }
-                match (chunk.underlineList) {
-                    case Some(specs) =>
-                        for (si in 0..specs.size) {
-                            let s = specs[si]
-                            _ = seg.setUnderline(s[0], s[1])
-                        }
-                    case None => ()
-                }
-                match (chunk.background) {
-                    case Some(bg) =>
-                        match (chunk.bgPadding) {
-                            case Some(pad) => _ = seg.setBackground(bg, pad[0], pad[1], pad[2], pad[3])
-                            case None => _ = seg.setBackground(bg)
-                        }
-                    case None => ()
-                }
-                match (chunk.getAttribute(Chunk.ANCHOR)) {
-                    case Some(url) => _ = seg.setAnchorURL(url)
-                    case None => ()
-                }
-                currentLine.add(seg)
+                currentLine.add(buildSegChunk(segText, chunk))
                 lineWidth += segWidth
             }
         }
@@ -877,6 +871,17 @@ public class PdfWriter <: DocListener {
             _currentY -= para.spacingAfter
             fireOnParagraphEnd(_currentY)
             return true
+        }
+
+        // keepTogether: 若整段放不下当前剩余空间，先换页再渲染（段高不超过整页才有意义）
+        if (para.keepTogether) {
+            let totalHeight = Float32(allLines.size) * para.leading + para.spacingAfter
+            let pageAvail = _pageSize.height - _marginTop - _marginBottom
+            if (totalHeight <= pageAvail && _currentY - totalHeight < _marginBottom) {
+                _currentY += para.spacingBefore
+                newPage()
+                _currentY -= para.spacingBefore
+            }
         }
 
         // ── Pass 2: 渲染每行，按对齐方式计算 x 起点 ──
@@ -1568,12 +1573,66 @@ public class PdfWriter <: DocListener {
             ri += 1
         }
 
-        // 绘制所有行
-        var rowIdx: Int32 = 0
+        let headerRows = table.headerRows
+        let footerRows = table.footerRows
+        let realHeaderCount: Int32 = if (headerRows > footerRows) { headerRows - footerRows } else { 0 }
+
+        // Calculate footer height used to reserve space before a page break
+        var footerHeight: Float32 = 0.0
+        var ffi: Int32 = realHeaderCount
+        while (ffi < headerRows) {
+            footerHeight += rowHeights[Int64(ffi)]
+            ffi += 1
+        }
+
+        // Draw real header rows on first page
+        if (!table.skipFirstHeader) {
+            var hIdx: Int32 = 0
+            while (hIdx < realHeaderCount) {
+                let rowH = rowHeights[Int64(hIdx)]
+                if (_currentY - rowH < _marginBottom) {
+                    newPage()
+                }
+                let rowOpt2 = table.getRow(hIdx)
+                if (rowOpt2.isSome()) {
+                    drawRowWithRowspan(rowOpt2.getOrThrow(), tableX, _currentY, columnWidths, rowH,
+                                       rowHeights, hIdx, rowCount)
+                }
+                _currentY -= rowH
+                hIdx += 1
+            }
+        }
+
+        // Draw data rows with footer/header repetition on page breaks
+        var rowIdx: Int32 = headerRows
         while (rowIdx < rowCount) {
             let rowH = rowHeights[Int64(rowIdx)]
-            if (_currentY - rowH < _marginBottom) {
+            if (_currentY - rowH - footerHeight < _marginBottom) {
+                // Draw footer rows before page break
+                var fIdx: Int32 = realHeaderCount
+                while (fIdx < headerRows) {
+                    let fRowH = rowHeights[Int64(fIdx)]
+                    let rowOpt2 = table.getRow(fIdx)
+                    if (rowOpt2.isSome()) {
+                        drawRowWithRowspan(rowOpt2.getOrThrow(), tableX, _currentY, columnWidths, fRowH,
+                                           rowHeights, fIdx, rowCount)
+                    }
+                    _currentY -= fRowH
+                    fIdx += 1
+                }
                 newPage()
+                // Draw real header rows at top of new page
+                var hIdx2: Int32 = 0
+                while (hIdx2 < realHeaderCount) {
+                    let hRowH = rowHeights[Int64(hIdx2)]
+                    let rowOpt2 = table.getRow(hIdx2)
+                    if (rowOpt2.isSome()) {
+                        drawRowWithRowspan(rowOpt2.getOrThrow(), tableX, _currentY, columnWidths, hRowH,
+                                           rowHeights, hIdx2, rowCount)
+                    }
+                    _currentY -= hRowH
+                    hIdx2 += 1
+                }
             }
             let rowOpt2 = table.getRow(rowIdx)
             if (rowOpt2.isSome()) {
@@ -1582,6 +1641,24 @@ public class PdfWriter <: DocListener {
             }
             _currentY -= rowH
             rowIdx += 1
+        }
+
+        // Draw footer rows on the last page
+        if (footerRows > 0) {
+            var fIdx: Int32 = realHeaderCount
+            while (fIdx < headerRows) {
+                let fRowH = rowHeights[Int64(fIdx)]
+                if (_currentY - fRowH < _marginBottom) {
+                    newPage()
+                }
+                let rowOpt2 = table.getRow(fIdx)
+                if (rowOpt2.isSome()) {
+                    drawRowWithRowspan(rowOpt2.getOrThrow(), tableX, _currentY, columnWidths, fRowH,
+                                       rowHeights, fIdx, rowCount)
+                }
+                _currentY -= fRowH
+                fIdx += 1
+            }
         }
 
         _currentY -= table.spacingAfter
@@ -1678,9 +1755,9 @@ public class PdfWriter <: DocListener {
     /**
      * 绘制单元格内的元素，返回新的 Y 坐标
      */
-    private func drawCellElement(elem: Element, x: Float32, y: Float32): Float32 {
+    private func drawCellElement(elem: Element, x: Float32, y: Float32, contentWidth: Float32): Float32 {
         match (elem) {
-            case para: Paragraph => drawParagraphInCell(para, x, y)
+            case para: Paragraph => drawParagraphInCell(para, x, y, contentWidth)
             case _ => y
         }
     }
@@ -1688,12 +1765,25 @@ public class PdfWriter <: DocListener {
     /**
      * 在单元格中绘制段落
      */
-    private func drawParagraphInCell(para: Paragraph, x: Float32, y: Float32): Float32 {
-        // 与 OpenPDF 一致：先下移 spacingBefore，再下移 leading 到 baseline，最后返回 baseline - spacingAfter
+    private func drawParagraphInCell(para: Paragraph, x: Float32, y: Float32, contentWidth: Float32): Float32 {
         let newY = y - para.spacingBefore - para.leading
         let paraChunks = para.getChunks()
+
+        // 计算总文字宽度，用于水平对齐
+        var totalWidth: Float32 = 0.0
         var idx: Int64 = 0
-        var currentX = x
+        while (idx < paraChunks.size) {
+            totalWidth += paraChunks[idx].getWidthPoint()
+            idx += 1
+        }
+        let startX: Float32 = match (para.alignment) {
+            case Center => x + (contentWidth - totalWidth) / 2.0
+            case Right => x + contentWidth - totalWidth
+            case _ => x
+        }
+
+        var currentX = startX
+        idx = 0
         while (idx < paraChunks.size) {
             drawChunk(paraChunks[idx], currentX, newY, para.alignment)
             currentX += paraChunks[idx].getWidthPoint()
@@ -1870,7 +1960,7 @@ public class PdfWriter <: DocListener {
         var i: Int64 = 0
         while (i < cell.contentSize) {
             let elem = cell.getContentElement(i)
-            elementY = drawCellElement(elem, contentX, elementY)
+            elementY = drawCellElement(elem, contentX, elementY, contentWidth)
             i += 1
         }
     }

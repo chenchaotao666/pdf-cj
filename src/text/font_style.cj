@@ -84,7 +84,7 @@ public enum FontStyle <: Equatable<FontStyle> {
 /**
  * 字体家族
  */
-public enum FontFamily {
+public enum FontFamily <: Equatable<FontFamily> {
     | Undefined
     | Courier
     | Helvetica
@@ -95,6 +95,14 @@ public enum FontFamily {
     /**
      * 转换为整数值
      */
+    public operator func ==(other: FontFamily): Bool {
+        this.toInt() == other.toInt()
+    }
+
+    public operator func !=(other: FontFamily): Bool {
+        this.toInt() != other.toInt()
+    }
+
     public func toInt(): Int32 {
         match (this) {
             case Undefined => -1

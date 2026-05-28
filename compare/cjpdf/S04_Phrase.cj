@@ -53,17 +53,17 @@ func s04_phrase(): Unit {
         // 7. add(Chunk) multiple chunks
         var ph7 = Phrase()
         _ = ph7.add(Chunk("7. add(Chunk): first", Font(helvBf, 12.0)))
-        _ = ph7.add(Chunk(" + second chunk", Font(helvBf, 12.0, FontStyle.Bold, Color(200, 0, 0))))
+        _ = ph7.add(Chunk(" + second chunk", Font(helvBf, 12.0, FontStyle.Bold, Color(255, 0, 0))))
         doc.add(Paragraph(ph7))
 
         // 8. add(Phrase) - nested phrase
-        let inner = Phrase("(nested phrase)", Font(helvBf, 11.0, FontStyle.Italic, Color(0, 0, 200)))
+        let inner = Phrase("(nested phrase)", Font(helvBf, 11.0, FontStyle.Italic, Color(0, 0, 255)))
         var ph8 = Phrase("8. add(Phrase): outer ")
         _ = ph8.add(inner)
         doc.add(Paragraph(ph8))
 
-        // 9. add(Chunk) variation
-        var ph9 = Phrase("9. add(Chunk): ")
+        // 9. add(Chunk) — addChunk() is protected in OpenPDF 2.x, use add() instead
+        var ph9 = Phrase("9. add(Chunk) [was addChunk()]: ")
         _ = ph9.add(Chunk("added via add(Chunk)", Font(helvBf, 12.0, FontStyle.Bold)))
         doc.add(Paragraph(ph9))
 
@@ -75,7 +75,7 @@ func s04_phrase(): Unit {
 
         // 11. setFont()
         var ph11 = Phrase("11. setFont(): originally plain")
-        ph11.setFont(Font(helvBf, 13.0, FontStyle.BoldItalic, Color(180, 0, 180)))
+        ph11.setFont(Font(helvBf, 13.0, FontStyle.BoldItalic, Color(255, 0, 255)))
         doc.add(Paragraph(ph11))
 
         // 12. getContent()
@@ -84,26 +84,31 @@ func s04_phrase(): Unit {
         let content = ph12.getContent()
         doc.add(Paragraph("getContent() => \"${content}\"", Font(helvBf, 11.0)))
 
-        // 13. CJK Phrase
-        let cjkPhrase = Phrase("13. CJK短语: 你好世界，这是短语测试。", Font(cjkBf, 13.0))
+        // 13. isEmpty()
+        let emptyPhrase = Phrase()
+        let nonEmptyPhrase = Phrase("not empty")
+        doc.add(Paragraph("13. isEmpty() on empty phrase: ${emptyPhrase.isEmpty()}", Font(helvBf, 12.0)))
+        doc.add(Paragraph("    isEmpty() on non-empty phrase: ${nonEmptyPhrase.isEmpty()}", Font(helvBf, 12.0)))
+
+        // 14. getChunks()
+        var ph14 = Phrase()
+        _ = ph14.add(Chunk("chunk1", Font(helvBf, 12.0)))
+        _ = ph14.add(Chunk("chunk2", Font(helvBf, 12.0)))
+        _ = ph14.add(Chunk("chunk3", Font(helvBf, 12.0)))
+        let chunks = ph14.getChunks()
+        doc.add(Paragraph("14. getChunks() count: ${chunks.size}", Font(helvBf, 12.0)))
+
+        // 15. CJK Phrase
+        let cjkPhrase = Phrase("15. CJK短语: 你好世界，这是短语测试。", Font(cjkBf, 13.0))
         doc.add(Paragraph(cjkPhrase))
 
-        // 14. Mixed phrase with CJK and Latin
+        // 16. Mixed phrase with CJK and Latin
         var mixedPhrase = Phrase()
-        _ = mixedPhrase.add(Chunk("14. Mixed: Hello ", Font(helvBf, 12.0)))
+        _ = mixedPhrase.add(Chunk("16. Mixed: Hello ", Font(helvBf, 12.0)))
         _ = mixedPhrase.add(Chunk("你好 ", Font(cjkBf, 12.0)))
         _ = mixedPhrase.add(Chunk("World ", Font(helvBf, 12.0)))
         _ = mixedPhrase.add(Chunk("世界", Font(cjkBf, 12.0)))
         doc.add(Paragraph(mixedPhrase))
-
-        // 15. Nested phrases
-        var outerPhrase = Phrase("15. Nested: ")
-        var innerPhrase1 = Phrase("first inner ", Font(helvBf, 12.0, FontStyle.Bold, Color(0, 150, 0)))
-        var innerPhrase2 = Phrase("second inner ", Font(helvBf, 12.0, FontStyle.Italic, Color(200, 100, 0)))
-        _ = outerPhrase.add(innerPhrase1)
-        _ = outerPhrase.add(innerPhrase2)
-        _ = outerPhrase.add(Chunk("end", Font(helvBf, 12.0)))
-        doc.add(Paragraph(outerPhrase))
 
         doc.close()
         println("  S04 done: ${_s04_OUT}cj_s04_phrase.pdf")
