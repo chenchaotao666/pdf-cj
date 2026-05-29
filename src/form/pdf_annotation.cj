@@ -188,9 +188,6 @@ public class PdfAnnotationLink <: PdfAnnotation {
     public init(rect: Rectangle) {
         super(AnnotationType.Link, rect)
         dictionary.put(PdfName("Subtype"), PdfName("Link"))
-
-        // 链接通常不显示边框
-        setBorder(0.0)
     }
 
     /**

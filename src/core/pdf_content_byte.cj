@@ -113,6 +113,11 @@ public class PdfContentByte {
     public func setFontAndSize(baseFont: BaseFont, name: String, size: Float32): Unit {
         _currentBaseFont = Some(baseFont)
         _currentFontSize = size
+        // Ensure font is registered in the current page's resource dictionary
+        match (_writer) {
+            case Some(w) => _ = w.addFont(baseFont)
+            case None => ()
+        }
         setFontAndSize(name, size)
     }
 
@@ -948,6 +953,13 @@ public class PdfContentByte {
      */
     public prop size: Int64 {
         get() { content.size }
+    }
+
+    /**
+     * 是否为空（无任何内容写入）
+     */
+    public func isEmpty(): Bool {
+        content.size == 0
     }
 
     /**

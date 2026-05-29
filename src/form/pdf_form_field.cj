@@ -65,6 +65,46 @@ func escapePdfStr(s: String): String {
     result
 }
 
+// Parse font size from a DA string like "/Helv 11 Tf 0 g" → 11.0
+func parseDaFsFromStr(da: String): Float32 {
+    let chars = ArrayList<Rune>()
+    for (c in da.runes()) { chars.add(c) }
+    let n = chars.size
+    var i: Int64 = 1
+    while (i < n) {
+        if (UInt32(chars[i - 1]) == 84u32 && UInt32(chars[i]) == 102u32) {  // 'T' 'f'
+            var j = i - 2
+            while (j >= 0 && UInt32(chars[j]) == 32u32) { j -= 1 }
+            let numEnd = j
+            while (j >= 0) {
+                let code = UInt32(chars[j])
+                if ((code >= 48u32 && code <= 57u32) || code == 46u32) { j -= 1 } else { break }
+            }
+            let numStart = j + 1
+            if (numStart <= numEnd) {
+                var numStr = ""
+                var k = numStart
+                while (k <= numEnd) { numStr += String(chars[k]); k += 1 }
+                var intPart: Int32 = 0
+                var fracPart: Float32 = 0.0
+                var fracDiv: Float32 = 10.0
+                var seenDot = false
+                for (c2 in numStr.runes()) {
+                    let code = UInt32(c2)
+                    if (code >= 48u32 && code <= 57u32) {
+                        let d = Int32(code - 48u32)
+                        if (!seenDot) { intPart = intPart * 10 + d }
+                        else { fracPart += Float32(d) / fracDiv; fracDiv *= 10.0 }
+                    } else if (code == 46u32) { seenDot = true }
+                }
+                return Float32(intPart) + fracPart
+            }
+        }
+        i += 1
+    }
+    0.0
+}
+
 // ===== FormAppearanceBuilder =====
 
 /**
@@ -98,13 +138,32 @@ class FormAppearanceBuilder {
     }
 
     /**
-     * 构建文本字段外观流
+     * 构建文本字段外观流（基础版）
      */
     static func buildTextStream(w: Float32, h: Float32, value: String): PdfStream {
-        let fontSize: Float32 = if (12.0 < h * 0.7) { 12.0 } else { h * 0.7 }
-        let baseline: Float32 = (h - fontSize) / 2.0 + 1.0
+        buildTextStreamFull(w, h, value, 0.0, false, 0.0, 0.0, 0.0, false, 0.0, 0.0, 0.0)
+    }
+
+    /**
+     * 构建文本字段外观流（完整版，支持背景色和边框色）
+     * bgR/G/B: 背景色（0.0–1.0）；hasBg=false 时不绘制背景
+     * bcR/G/B: 边框色（0.0–1.0）；hasBorder=false 时不绘制边框
+     */
+    static func buildTextStreamFull(w: Float32, h: Float32, value: String, fontSize: Float32,
+                                     hasBg: Bool, bgR: Float32, bgG: Float32, bgB: Float32,
+                                     hasBorder: Bool, bcR: Float32, bcG: Float32, bcB: Float32): PdfStream {
+        let fs: Float32 = if (fontSize > 0.0) { fontSize } else if (12.0 < h * 0.7) { 12.0 } else { h * 0.7 }
+        let baseline: Float32 = (h - fs) / 2.0 + 1.0
         let escaped = escapePdfStr(value)
-        let content = "/Tx BMC\nq\nBT\n/Helv ${fmtF(fontSize)} Tf\n0 0 0 rg\n2 ${fmtF(baseline)} Td\n(${escaped}) Tj\nET\nQ\nEMC\n"
+        var inner = ""
+        if (hasBg) {
+            inner += "${fmtF(bgR)} ${fmtF(bgG)} ${fmtF(bgB)} rg\n0 0 ${fmtF(w)} ${fmtF(h)} re f\n"
+        }
+        if (hasBorder) {
+            inner += "${fmtF(bcR)} ${fmtF(bcG)} ${fmtF(bcB)} RG\n1 w\n0.5 0.5 ${fmtF(w - 1.0)} ${fmtF(h - 1.0)} re S\n"
+        }
+        inner += "BT\n/Helv ${fmtF(fs)} Tf\n0 0 0 rg\n2 ${fmtF(baseline)} Td\n(${escaped}) Tj\nET\n"
+        let content = "/Tx BMC\nq\n${inner}Q\nEMC\n"
         let stream = PdfStream(content)
         makeXObject(stream, w, h, helveticaResources())
         stream
@@ -324,6 +383,15 @@ public open class PdfFormField {
  * 用于输入单行或多行文本
  */
 public class PdfTextFormField <: PdfFormField {
+    // 边框色（-1 表示未设置）
+    private var mkBcR: Float32 = -1.0
+    private var mkBcG: Float32 = -1.0
+    private var mkBcB: Float32 = -1.0
+    // 背景色（-1 表示未设置）
+    private var mkBgR: Float32 = -1.0
+    private var mkBgG: Float32 = -1.0
+    private var mkBgB: Float32 = -1.0
+
     /**
      * 构造函数
      */
@@ -338,14 +406,58 @@ public class PdfTextFormField <: PdfFormField {
         addWidget(widget)
     }
 
+    /** 设置边框颜色（0.0–1.0 分量），同时写入 /MK 和 /BS */
+    public func setBorderColor(r: Float32, g: Float32, b: Float32): Unit {
+        mkBcR = r; mkBcG = g; mkBcB = b
+        writeMKDict()
+        writeBSDict()
+    }
+
+    /** 设置背景填充颜色（0.0–1.0 分量），同时写入 /MK */
+    public func setBackgroundColor(r: Float32, g: Float32, b: Float32): Unit {
+        mkBgR = r; mkBgG = g; mkBgB = b
+        writeMKDict()
+    }
+
+    private func writeMKDict(): Unit {
+        let mkDict = PdfDictionary()
+        if (mkBcR >= 0.0) {
+            let bc = PdfArray()
+            bc.add(PdfNumber(mkBcR)); bc.add(PdfNumber(mkBcG)); bc.add(PdfNumber(mkBcB))
+            mkDict.put(PdfName("BC"), bc)
+        }
+        if (mkBgR >= 0.0) {
+            let bg = PdfArray()
+            bg.add(PdfNumber(mkBgR)); bg.add(PdfNumber(mkBgG)); bg.add(PdfNumber(mkBgB))
+            mkDict.put(PdfName("BG"), bg)
+        }
+        dictionary.put(PdfName("MK"), mkDict)
+    }
+
+    private func writeBSDict(): Unit {
+        let bsDict = PdfDictionary()
+        bsDict.put(PdfName("S"), PdfName("S"))
+        bsDict.put(PdfName("W"), PdfNumber(1))
+        dictionary.put(PdfName("BS"), bsDict)
+    }
+
     /**
-     * 生成外观字典 /AP
+     * 生成外观字典 /AP（读取 /DA 中的字号，绘制背景和边框）
      */
     public func generateAppearance(): Unit {
         let w = rect.right - rect.left
         let h = rect.top - rect.bottom
         let value = getValue()
-        let normalStream = FormAppearanceBuilder.buildTextStream(w, h, value)
+        var fs: Float32 = 0.0
+        match (dictionary.get(PdfName("DA"))) {
+            case Some(s: PdfString) => fs = parseDaFsFromStr(s.value)
+            case _ => ()
+        }
+        let normalStream = FormAppearanceBuilder.buildTextStreamFull(
+            w, h, value, fs,
+            mkBgR >= 0.0, mkBgR, mkBgG, mkBgB,
+            mkBcR >= 0.0, mkBcR, mkBcG, mkBcB
+        )
         let normalDict = PdfDictionary()
         normalDict.put(PdfName("N"), normalStream)
         for (i in 0..widgets.size) {

@@ -52,6 +52,9 @@ func s17CreateFormPdf(): Unit {
     for (label in labels) {
         doc.add(Paragraph(label + ":", Font(helvBf, 11.0)))
         let tf = PdfFormFieldFactory.createTextField(label.toAsciiLower(), 200.0, y - 20.0, 280.0, 20.0)
+        tf.setDefaultAppearance("/Helv 11 Tf 0 g")
+        tf.setBorderColor(0.502, 0.502, 0.502)       // gray, matching Java Color.GRAY
+        tf.setBackgroundColor(0.961, 0.961, 1.0)     // light blue, matching Java new Color(245,245,255)
         tf.setValue("")
         tf.generateAppearance()
         formWriter.addFormField(tf)

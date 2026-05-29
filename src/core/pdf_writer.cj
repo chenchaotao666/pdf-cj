@@ -39,6 +39,7 @@ public class PdfWriter <: DocListener {
     // 当前页面状态
     private var _currentPage: ?PdfPage = None
     private var _currentContent: ?PdfContentByte = None
+    private var _directContent: ?PdfContentByte = None
     private var _resources: PdfResources = PdfResources()
 
     // 页面设置
@@ -132,6 +133,7 @@ public class PdfWriter <: DocListener {
         let writer = PdfWriter(os)
         writer._document = Some(document)
         writer._currentContent = Some(PdfContentByte(writer))
+        writer._directContent = Some(PdfContentByte(writer))
         document.addDocListener(writer)
         writer
     }
@@ -318,6 +320,7 @@ public class PdfWriter <: DocListener {
         // 创建新页面
         _currentPage = Some(PdfPage(_pageSize))
         _currentContent = PdfContentByte(this)
+        _directContent = PdfContentByte(this)
         _resources = PdfResources()
 
         // 重置绘图位置
@@ -618,12 +621,31 @@ public class PdfWriter <: DocListener {
             case None => ()
         }
 
-        // 写入内容流
+        // 写入内容流：页面内容在前，直接内容（direct content）在后（渲染在上方）
         let contentStream = getContent().toStream()
         let contentObjNum = _body.reserveObjectNumber()
         encryptStream(contentStream, contentObjNum)
         let contentRef = _body.add(contentStream, contentObjNum)
-        page.setContents(contentRef)
+
+        var hasDirect = false
+        match (_directContent) {
+            case Some(dc) =>
+                if (!dc.isEmpty()) {
+                    hasDirect = true
+                    let dcStream = dc.toStream()
+                    let dcObjNum = _body.reserveObjectNumber()
+                    encryptStream(dcStream, dcObjNum)
+                    let dcRef = _body.add(dcStream, dcObjNum)
+                    let contentsArr = PdfArray()
+                    contentsArr.add(contentRef)
+                    contentsArr.add(dcRef)
+                    page.setContents(contentsArr)
+                }
+            case None => ()
+        }
+        if (!hasDirect) {
+            page.setContents(contentRef)
+        }
 
         // 设置资源
         page.setResources(_resources.toDictionary())
@@ -2519,10 +2541,13 @@ public class PdfWriter <: DocListener {
     }
 
     /**
-     * 获取直接内容（用于高级绘图）
+     * 获取直接内容（用于高级绘图，渲染在文档内容之上）
      */
     public func getDirectContent(): PdfContentByte {
-        getContent()
+        match (_directContent) {
+            case Some(dc) => dc
+            case None => throw PdfException("PdfWriter not properly initialized")
+        }
     }
 
     /**

@@ -94,6 +94,21 @@ public class BarcodeEAN {
         img
     }
 
+    public func createFlowImage(barColor: Color): Image {
+        let bars = if (isEAN8) { encodeEAN8() } else { encodeEAN13() }
+        var totalMods: Int32 = 0
+        var i: Int64 = 0
+        while (i < bars.size) {
+            let (w, _) = bars[i]
+            totalMods += w
+            i += 1
+        }
+        let actualWidth = Float32(totalMods) * moduleWidth
+        let img = makeBarsBitmapImage(bars, Int32(barHeight), barColor)
+        img.scaleAbsolute(actualWidth, barHeight)
+        img
+    }
+
     private func calcTotalModules(bars: ArrayList<(Int32, Bool)>): Int32 {
         var total: Int32 = 0
         var i: Int64 = 0

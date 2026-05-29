@@ -51,8 +51,12 @@ public class PdfParser {
     /**
      * 解析数字或间接引用 "n1 n2 R"
      * 消费 n1 后向前窥视：若后跟 n2 R 则返回 PdfIndirectReference，否则回退
+     * 含小数点的数字直接返回浮点数（不可能是间接引用）
      */
     private func parseNumberOrRef(numStr: String): ?PdfObject {
+        if (isRealNumber(numStr)) {
+            return Some(PdfNumber(stringToFloat(numStr)))
+        }
         let n1 = stringToInt(numStr)
         let savedPos = tokenizer.getPosition()
         match (tokenizer.nextToken()) {
@@ -80,6 +84,41 @@ public class PdfParser {
                 tokenizer.setPosition(savedPos)
                 Some(PdfNumber(Float32(n1)))
         }
+    }
+
+    private func isRealNumber(str: String): Bool {
+        for (ch in str) {
+            if (Int64(ch) == 0x2E) { return true }
+        }
+        false
+    }
+
+    private func stringToFloat(str: String): Float64 {
+        var intPart: Float64 = 0.0
+        var fracPart: Float64 = 0.0
+        var negative = false
+        var inFrac = false
+        var fracDiv: Float64 = 10.0
+
+        for (ch in str) {
+            let code = Int64(ch)
+            if (code == 0x2D) {  // '-'
+                negative = true
+            } else if (code == 0x2E) {  // '.'
+                inFrac = true
+            } else if (code >= 0x30 && code <= 0x39) {  // 0-9
+                let d = Float64(Int64(code - 0x30))
+                if (inFrac) {
+                    fracPart += d / fracDiv
+                    fracDiv *= 10.0
+                } else {
+                    intPart = intPart * 10.0 + d
+                }
+            }
+        }
+
+        let result = intPart + fracPart
+        if (negative) { -result } else { result }
     }
 
     /**

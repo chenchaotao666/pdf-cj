@@ -138,6 +138,21 @@ public class Barcode39 {
         img
     }
 
+    public func createFlowImage(barColor: Color): Image {
+        let bars = encode()
+        var totalMods: Int32 = 0
+        var i: Int64 = 0
+        while (i < bars.size) {
+            let (w, _) = bars[i]
+            totalMods += w
+            i += 1
+        }
+        let actualWidth = Float32(totalMods) * moduleWidth
+        let img = makeBarsBitmapImage(bars, Int32(barHeight), barColor)
+        img.scaleAbsolute(actualWidth, barHeight)
+        img
+    }
+
     private func encode(): ArrayList<(Int32, Bool)> {
         let result = ArrayList<(Int32, Bool)>()
         appendSym(result, r'*')

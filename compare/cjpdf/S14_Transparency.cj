@@ -49,7 +49,7 @@ func s14_transparency(): Unit {
         let gsName1 = writer.addGState(gs1)
         cb.saveState()
         cb.setExtGState(gsName1)
-        cb.setColorFill(Color(220, 0, 0))
+        cb.setColorFill(Color(255, 0, 0))
         cb.rectangle(80.0, baseY + 20.0, 150.0, 100.0)
         cb.fill()
         cb.restoreState()
@@ -61,7 +61,7 @@ func s14_transparency(): Unit {
         let gsName2 = writer.addGState(gs2)
         cb.saveState()
         cb.setExtGState(gsName2)
-        cb.setColorFill(Color(0, 180, 0))
+        cb.setColorFill(Color(0, 255, 0))
         cb.rectangle(160.0, baseY + 30.0, 150.0, 100.0)
         cb.fill()
         cb.restoreState()
@@ -73,7 +73,7 @@ func s14_transparency(): Unit {
         let gsName3 = writer.addGState(gs3)
         cb.saveState()
         cb.setExtGState(gsName3)
-        cb.setColorFill(Color(0, 0, 220))
+        cb.setColorFill(Color(0, 0, 255))
         cb.rectangle(240.0, baseY + 10.0, 150.0, 100.0)
         cb.fill()
         cb.restoreState()
@@ -110,7 +110,7 @@ func s14_transparency(): Unit {
 
             // Background orange rectangle
             cb.saveState()
-            cb.setColorFill(Color(255, 165, 0))
+            cb.setColorFill(Color(255, 200, 0))
             cb.rectangle(bx, blendY, 70.0, 60.0)
             cb.fill()
             cb.restoreState()
@@ -122,13 +122,13 @@ func s14_transparency(): Unit {
             let gsBlendName = writer.addGState(gsBlend)
             cb.saveState()
             cb.setExtGState(gsBlendName)
-            cb.setColorFill(Color(0, 0, 220))
+            cb.setColorFill(Color(0, 0, 255))
             cb.rectangle(bx + 15.0, blendY + 15.0, 50.0, 50.0)
             cb.fill()
             cb.restoreState()
 
             cb.beginText()
-            cb.setFontAndSize(helvBf, _s14_HELV_NAME, 7.0)
+            cb.setFontAndSize(helvBf, _s14_HELV_NAME, 8.0)
             cb.setColorFill(Color(0, 0, 0))
             cb.setTextMatrix(bx, blendY - 12.0)
             cb.showText(blendNames[i])
@@ -143,8 +143,8 @@ func s14_transparency(): Unit {
 
         // Colorful background stripes
         let stripeColors = [
-            Color(220, 0, 0), Color(255, 165, 0), Color(255, 255, 0),
-            Color(0, 180, 0), Color(0, 0, 220), Color(180, 0, 180)
+            Color(255, 0, 0), Color(255, 200, 0), Color(255, 255, 0),
+            Color(0, 255, 0), Color(0, 0, 255), Color(255, 0, 255)
         ]
         for (i in 0..6) {
             cb.setColorFill(stripeColors[i])
@@ -178,7 +178,7 @@ func s14_transparency(): Unit {
             let gsCircleName = writer.addGState(gsCircle)
             cb.saveState()
             cb.setExtGState(gsCircleName)
-            cb.setColorStroke(Color(220, 0, 0))
+            cb.setColorStroke(Color(255, 0, 0))
             cb.setLineWidth(4.0)
             let cx = Float32(100 + i * 90)
             cb.ellipse(cx - 35.0, circY - 30.0, cx + 35.0, circY + 30.0)

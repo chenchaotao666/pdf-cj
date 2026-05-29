@@ -196,6 +196,8 @@ public class PdfStamper {
         // 4. 写修改后的 AcroFields 对象（增量更新字段字典）
         match (acroFieldsInstance) {
             case Some(af) =>
+                // 先提交所有 pending 值并生成外观流，再写增量更新
+                af.generateAppearances()
                 let dirtyFields = af.getDirtyFieldObjects()
                 for (i in 0..dirtyFields.size) {
                     let (objNum, dict) = dirtyFields[i]

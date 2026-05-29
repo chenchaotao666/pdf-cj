@@ -75,6 +75,71 @@ public class BarcodePDF417 {
         img
     }
 
+    public func createFlowImage(barColor: Color, targetWidth: Float32, targetHeight: Float32): Image {
+        let rows = buildRows()
+        let numRows = Int32(rows.size)
+        let rowModules = 17 + columns * 17 + 18
+        let widthPx = rowModules * 2 + 2
+        let rowHPx: Int32 = 4
+        let heightPx = numRows * rowHPx
+
+        let rowBytes = ((widthPx * 3 + 3) / 4) * 4
+        let pixelSize = rowBytes * heightPx
+        let fileSize = 54 + pixelSize
+        let data = Array<UInt8>(Int64(fileSize), repeat: UInt8(0xFF))
+        data[0] = UInt8(0x42); data[1] = UInt8(0x4D)
+        writeLE32(data, 2, fileSize)
+        writeLE32(data, 10, 54)
+        writeLE32(data, 14, 40)
+        writeLE32(data, 18, widthPx)
+        writeLE32(data, 22, heightPx)
+        data[26] = UInt8(1)
+        data[27] = UInt8(0)
+        data[28] = UInt8(24)
+        data[29] = UInt8(0)
+        data[30] = UInt8(0); data[31] = UInt8(0); data[32] = UInt8(0); data[33] = UInt8(0)
+
+        let barB = barColor.blue
+        let barG = barColor.green
+        let barR = barColor.red
+
+        // BMP 底部到顶部存储：display row d(0=top) → BMP row = heightPx-1-d*rowHPx-scanLine
+        var rowIdx: Int64 = 0
+        while (rowIdx < Int64(numRows)) {
+            let bars = rows[rowIdx]
+            var curX: Int32 = 0
+            var bi: Int64 = 0
+            while (bi < bars.size) {
+                let (w, isBar) = bars[bi]
+                let pxW = w * 2
+                if (isBar) {
+                    var scanLine: Int32 = 0
+                    while (scanLine < rowHPx) {
+                        let bmpRow: Int32 = heightPx - 1 - Int32(rowIdx) * rowHPx - scanLine
+                        if (bmpRow >= 0 && bmpRow < heightPx) {
+                            var col: Int32 = curX
+                            while (col < curX + pxW && col < widthPx) {
+                                let offset = Int64(54 + bmpRow * rowBytes + col * 3)
+                                data[offset]     = barB
+                                data[offset + 1] = barG
+                                data[offset + 2] = barR
+                                col += 1
+                            }
+                        }
+                        scanLine += 1
+                    }
+                }
+                curX += pxW
+                bi += 1
+            }
+            rowIdx += 1
+        }
+
+        let img = Image.getInstance(data)
+        img.scaleAbsolute(targetWidth, targetHeight)
+        img
+    }
+
     // ── 行数据生成 ─────────────────────────────────────────────────────────────
 
     // 每行 = [起始条空, 数据码字列表, 终止条空]

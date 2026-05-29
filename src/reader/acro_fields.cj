@@ -64,10 +64,79 @@ private func makeXObj(stream: PdfStream, w: Float32, h: Float32, res: PdfDiction
     stream.put(PdfName("Resources"), res)
 }
 
-private func buildTextAP(w: Float32, h: Float32, value: String): PdfStream {
-    let fs: Float32 = if (12.0 < h * 0.7) { 12.0 } else { h * 0.7 }
+// Parse a simple decimal string to Float32 (no sign, no exponent)
+private func parseSimpleFloat(s: String): Float32 {
+    var intPart: Int32 = 0
+    var fracPart: Float32 = 0.0
+    var fracDiv: Float32 = 10.0
+    var seenDot = false
+    for (c in s.runes()) {
+        let code = UInt32(c)
+        if (code >= 48u32 && code <= 57u32) {
+            let d = Int32(code - 48u32)
+            if (!seenDot) { intPart = intPart * 10 + d }
+            else { fracPart += Float32(d) / fracDiv; fracDiv *= 10.0 }
+        } else if (code == 46u32) {
+            seenDot = true
+        }
+    }
+    Float32(intPart) + fracPart
+}
+
+// Extract font size from a Default Appearance string like "/Helv 11 Tf 0 g".
+// Returns 0.0 if the token before "Tf" is 0 or not found (auto-size).
+private func parseDaFontSize(da: String): Float32 {
+    let chars = ArrayList<Rune>()
+    for (c in da.runes()) { chars.add(c) }
+    let n = chars.size
+    var i: Int64 = 1
+    while (i < n) {
+        // Look for 'T'(84) followed by 'f'(102)
+        if (UInt32(chars[i - 1]) == 84u32 && UInt32(chars[i]) == 102u32) {
+            // Step back over the space(s) between the number and "Tf"
+            var j = i - 2
+            while (j >= 0 && UInt32(chars[j]) == 32u32) { j -= 1 }
+            let numEnd = j
+            // Walk back over digit/dot chars
+            while (j >= 0) {
+                let code = UInt32(chars[j])
+                if ((code >= 48u32 && code <= 57u32) || code == 46u32) { j -= 1 }
+                else { break }
+            }
+            let numStart = j + 1
+            if (numStart <= numEnd) {
+                var numStr = ""
+                var k = numStart
+                while (k <= numEnd) { numStr += String(chars[k]); k += 1 }
+                return parseSimpleFloat(numStr)
+            }
+        }
+        i += 1
+    }
+    0.0
+}
+
+// bgR/G/B and bcR/G/B: use -1.0 to signal "not set" (no fill / no border)
+private func buildTextAP(w: Float32, h: Float32, value: String, daFontSize: Float32,
+                          bgR: Float32, bgG: Float32, bgB: Float32,
+                          bcR: Float32, bcG: Float32, bcB: Float32): PdfStream {
+    let fs: Float32 = if (daFontSize > 0.0) {
+        daFontSize
+    } else if (12.0 < h * 0.7) {
+        12.0
+    } else {
+        h * 0.7
+    }
     let bl: Float32 = (h - fs) / 2.0 + 1.0
-    let content = "/Tx BMC\nq\nBT\n/Helv ${fmtF(fs)} Tf\n0 0 0 rg\n2 ${fmtF(bl)} Td\n(${escapeStr(value)}) Tj\nET\nQ\nEMC\n"
+    var inner = ""
+    if (bgR >= 0.0) {
+        inner += "${fmtF(bgR)} ${fmtF(bgG)} ${fmtF(bgB)} rg\n0 0 ${fmtF(w)} ${fmtF(h)} re f\n"
+    }
+    if (bcR >= 0.0) {
+        inner += "${fmtF(bcR)} ${fmtF(bcG)} ${fmtF(bcB)} RG\n1 w\n0.5 0.5 ${fmtF(w - 1.0)} ${fmtF(h - 1.0)} re S\n"
+    }
+    inner += "BT\n/Helv ${fmtF(fs)} Tf\n0 0 0 rg\n2 ${fmtF(bl)} Td\n(${escapeStr(value)}) Tj\nET\n"
+    let content = "/Tx BMC\nq\n${inner}Q\nEMC\n"
     let stream = PdfStream(content)
     makeXObj(stream, w, h, helveticaRes())
     stream
@@ -134,6 +203,9 @@ public class FieldItem {
     // 待写入的新值（None = 未修改）
     private var pendingValue: ?String = None
 
+    // 是否曾被 setValue() 修改（commitValue 后仍保持 true，供 getDirtyFieldObjects 过滤用）
+    public var wasModified: Bool = false
+
     // 字段矩形（从第一个 widget 的 /Rect 中提取，宽 × 高）
     public var rectW: Float32 = 100.0
     public var rectH: Float32 = 20.0
@@ -173,6 +245,7 @@ public class FieldItem {
     /** 标记新值（下次 generateAppearances 时生效） */
     public func setValue(v: String): Unit {
         pendingValue = Some(v)
+        wasModified = true
     }
 
     /** 是否有未提交的值变更 */
@@ -477,9 +550,42 @@ public class AcroFields {
         let h = item.rectH
         let value = item.getValue()
 
+        // Read font size from /DA if present (e.g. "/Helv 11 Tf 0 g" → 11.0)
+        var daFontSize: Float32 = 0.0
+        match (item.dictionary.get(PdfName("DA"))) {
+            case Some(s: PdfString) => daFontSize = parseDaFontSize(s.value)
+            case _ => ()
+        }
+
+        // Read background/border colors from /MK
+        var bgR: Float32 = -1.0; var bgG: Float32 = -1.0; var bgB: Float32 = -1.0
+        var bcR: Float32 = -1.0; var bcG: Float32 = -1.0; var bcB: Float32 = -1.0
+        let mkDict: ?PdfDictionary = match (item.dictionary.get(PdfName("MK"))) {
+            case Some(d: PdfDictionary) => Some(d)
+            case _ => None
+        }
+        match (mkDict) {
+            case Some(mk) =>
+                match (mk.get(PdfName("BG"))) {
+                    case Some(arr: PdfArray) =>
+                        if (arr.size >= 3) {
+                            bgR = toF32(arr.get(0)); bgG = toF32(arr.get(1)); bgB = toF32(arr.get(2))
+                        }
+                    case _ => ()
+                }
+                match (mk.get(PdfName("BC"))) {
+                    case Some(arr: PdfArray) =>
+                        if (arr.size >= 3) {
+                            bcR = toF32(arr.get(0)); bcG = toF32(arr.get(1)); bcB = toF32(arr.get(2))
+                        }
+                    case _ => ()
+                }
+            case None => ()
+        }
+
         match (item.fieldType) {
             case FieldType.Text | FieldType.Choice =>
-                let stream = buildTextAP(w, h, value)
+                let stream = buildTextAP(w, h, value, daFontSize, bgR, bgG, bgB, bcR, bcG, bcB)
                 let apDict = PdfDictionary()
                 apDict.put(PdfName("N"), stream)
                 putAPOnWidgets(item, apDict)
@@ -574,7 +680,7 @@ public class AcroFields {
     public func getDirtyFieldObjects(): ArrayList<(Int32, PdfDictionary)> {
         let result = ArrayList<(Int32, PdfDictionary)>()
         for ((_, item) in fields) {
-            if (item.objectNumber > 0) {
+            if (item.objectNumber > 0 && item.wasModified) {
                 result.add((item.objectNumber, item.dictionary))
             }
         }
@@ -586,7 +692,7 @@ public class AcroFields {
      */
     public func hasDirtyFields(): Bool {
         for ((_, item) in fields) {
-            if (item.objectNumber > 0) { return true }
+            if (item.isDirty()) { return true }
         }
         false
     }
@@ -657,7 +763,7 @@ public class FieldAppearanceGenerator {
     public static func generateTextFieldAppearance(value: String, rect: Array<Float32>, fontSize: Float32): PdfStream {
         let w: Float32 = if (rect.size >= 4) { rect[2] - rect[0] } else { 100.0 }
         let h: Float32 = if (rect.size >= 4) { rect[3] - rect[1] } else { 20.0 }
-        buildTextAP(w, h, value)
+        buildTextAP(w, h, value, fontSize, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0)
     }
 
     public static func generateCheckBoxAppearance(checked: Bool, rect: Array<Float32>): PdfStream {

@@ -44,6 +44,72 @@ public func makeBarcodeImage(widthPx: Int32, heightPx: Int32): Image {
     Image.getInstance(data)
 }
 
+/**
+ * 生成带有实际条形码像素的 24-bit BMP，供流式布局使用
+ * BMP 标准：行从底部到顶部存储（convertToRGB 会自动翻转）
+ * 2px per module，与条形码 moduleWidth 通过 scaleAbsolute 对齐
+ */
+public func makeBarsBitmapImage(
+    bars: ArrayList<(Int32, Bool)>,
+    heightPx: Int32,
+    barColor: Color
+): Image {
+    var totalMods: Int32 = 0
+    var i: Int64 = 0
+    while (i < bars.size) {
+        let (w, _) = bars[i]
+        totalMods += w
+        i += 1
+    }
+    let widthPx = totalMods * 2 + 2
+    let rowBytes = ((widthPx * 3 + 3) / 4) * 4
+    let pixelSize = rowBytes * heightPx
+    let fileSize = 54 + pixelSize
+    let data = Array<UInt8>(Int64(fileSize), repeat: UInt8(0xFF))
+    data[0] = UInt8(0x42)
+    data[1] = UInt8(0x4D)
+    writeLE32(data, 2, fileSize)
+    writeLE32(data, 10, 54)
+    writeLE32(data, 14, 40)
+    writeLE32(data, 18, widthPx)
+    writeLE32(data, 22, heightPx)
+    data[26] = UInt8(1)
+    data[27] = UInt8(0)  // high byte of biPlanes = 0
+    data[28] = UInt8(24)
+    data[29] = UInt8(0)  // high byte of biBitCount = 0 (must be 0 for bitDepth=24)
+    data[30] = UInt8(0)
+    data[31] = UInt8(0)
+    data[32] = UInt8(0)
+    data[33] = UInt8(0)
+
+    let barB = barColor.blue
+    let barG = barColor.green
+    let barR = barColor.red
+    var curX: Int32 = 0
+    var bi: Int64 = 0
+    while (bi < bars.size) {
+        let (w, isBar) = bars[bi]
+        let pxW = w * 2
+        if (isBar) {
+            var row: Int32 = 0
+            while (row < heightPx) {
+                var col: Int32 = curX
+                while (col < curX + pxW && col < widthPx) {
+                    let offset = Int64(54 + row * rowBytes + col * 3)
+                    data[offset]     = barB
+                    data[offset + 1] = barG
+                    data[offset + 2] = barR
+                    col += 1
+                }
+                row += 1
+            }
+        }
+        curX += pxW
+        bi += 1
+    }
+    Image.getInstance(data)
+}
+
 func writeLE32(data: Array<UInt8>, offset: Int32, val: Int32): Unit {
     let o = Int64(offset)
     data[o]     = UInt8(val & 0xFF)

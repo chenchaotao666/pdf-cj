@@ -2,7 +2,7 @@ package pdf_cj_examples
 
 import pdf_cj.api.{Document, Paragraph, Phrase, Chunk}
 import pdf_cj.core.{PdfWriter, PdfContentByte}
-import pdf_cj.barcode.{Barcode128, BarcodeEAN, Barcode39, BarcodeQRCode, BarcodePDF417}
+import pdf_cj.barcode.{Barcode128, BarcodeEAN, Barcode39, BarcodePDF417}
 import pdf_cj.text.{BaseFont, Font, FontStyle, Color, Alignment}
 import pdf_cj.util.{PageSize, Rectangle}
 import std.fs.{File, OpenMode, Path}
@@ -22,103 +22,111 @@ func s16_barcode(): Unit {
         let writer = PdfWriter.getInstance(doc, file)
         doc.open()
 
-        let cb = writer.getDirectContent()
-
         var title = Paragraph("S16: Barcode Demo", Font(cjkBf, 18.0, FontStyle.Bold))
         title.setAlignment(Alignment.Center)
         title.setSpacingAfter(20.0)
         doc.add(title)
 
-        // 1. Barcode128
+        // 1. DataMatrix (not available in pdf-cj)
+        doc.add(Paragraph("1. DataMatrix Barcode (BarcodeDatamatrix):", Font(helvBf, 12.0)))
+        doc.add(Paragraph("1. DataMatrix error: BarcodeDatamatrix not available in pdf-cj", Font(helvBf, 10.0)))
+
+        // 2. Code-128
         try {
-            doc.add(Paragraph("1. Code-128:", Font(helvBf, 12.0)))
-            let bc128 = Barcode128("OpenPDF-2.0.3")
-            bc128.x = 72.0
-            bc128.y = 700.0
-            bc128.barHeight = 40.0
-            bc128.moduleWidth = 1.5
-            bc128.createImage(cb, Color(0, 0, 0), Color(0, 0, 0))
-            doc.add(Paragraph(" ", Font(helvBf, 50.0)))
+            doc.add(Paragraph("2. Code-128:", Font(helvBf, 12.0)))
+            let code128 = Barcode128("OpenPDF-2.0.3")
+            code128.barHeight = 40.0
+            let img = code128.createFlowImage(Color(0, 0, 0))
+            img.setAlignment(Alignment.Left)
+            img.setSpacingBefore(4.0)
+            img.setSpacingAfter(10.0)
+            doc.add(img)
         } catch (e: Exception) {
-            doc.add(Paragraph("1. Code-128 error: ${e.message}", Font(helvBf, 10.0)))
+            doc.add(Paragraph("2. Code-128 error: ${e.message}", Font(helvBf, 10.0)))
         }
 
-        // 2. BarcodeEAN (EAN-13)
-        try {
-            doc.add(Paragraph("2. EAN-13:", Font(helvBf, 12.0)))
-            let ean = BarcodeEAN("9781234567897")
-            ean.x = 72.0
-            ean.y = 620.0
-            ean.barHeight = 60.0
-            ean.moduleWidth = 2.0
-            ean.createImage(cb, Color(0, 0, 0), Color(0, 0, 0))
-            doc.add(Paragraph(" ", Font(helvBf, 70.0)))
-        } catch (e: Exception) {
-            doc.add(Paragraph("2. EAN-13 error: ${e.message}", Font(helvBf, 10.0)))
-        }
-
-        // 3. Barcode39
+        // 3. Code-39
         try {
             doc.add(Paragraph("3. Code-39:", Font(helvBf, 12.0)))
-            let bc39 = Barcode39("OPENPDF")
-            bc39.x = 72.0
-            bc39.y = 530.0
-            bc39.barHeight = 40.0
-            bc39.moduleWidth = 1.5
-            bc39.createImage(cb, Color(0, 0, 0), Color(0, 0, 0))
-            doc.add(Paragraph(" ", Font(helvBf, 50.0)))
+            let code39 = Barcode39("OPENPDF")
+            code39.barHeight = 40.0
+            let img = code39.createFlowImage(Color(0, 0, 0))
+            img.setAlignment(Alignment.Left)
+            img.setSpacingBefore(4.0)
+            img.setSpacingAfter(10.0)
+            doc.add(img)
         } catch (e: Exception) {
             doc.add(Paragraph("3. Code-39 error: ${e.message}", Font(helvBf, 10.0)))
         }
 
-        // 4. QR Code
+        // 4. EAN-13
         try {
-            doc.add(Paragraph("4. QR Code:", Font(helvBf, 12.0)))
-            let qr = BarcodeQRCode("https://github.com/LibrePDF/OpenPDF")
-            let qrImg = qr.createImage(cb, Color(0, 0, 0), Color(255, 255, 255))
-            qrImg.setAbsolutePosition(72.0, 290.0)
-            doc.add(qrImg)
-            doc.add(Paragraph(" ", Font(helvBf, 180.0)))
+            doc.add(Paragraph("4. EAN-13:", Font(helvBf, 12.0)))
+            let ean = BarcodeEAN("9781234567897")
+            ean.barHeight = 60.0
+            let img = ean.createFlowImage(Color(0, 0, 0))
+            img.setAlignment(Alignment.Left)
+            img.setSpacingBefore(4.0)
+            img.setSpacingAfter(10.0)
+            doc.add(img)
         } catch (e: Exception) {
-            doc.add(Paragraph("4. QR Code error: ${e.message}", Font(helvBf, 10.0)))
+            doc.add(Paragraph("4. EAN-13 error: ${e.message}", Font(helvBf, 10.0)))
         }
 
-        // 5. PDF417
+        // 5. EAN-8
         try {
-            doc.add(Paragraph("5. PDF417:", Font(helvBf, 12.0)))
+            doc.add(Paragraph("5. EAN-8:", Font(helvBf, 12.0)))
+            let ean8 = BarcodeEAN("12345670")
+            ean8.isEAN8 = true
+            ean8.barHeight = 50.0
+            let img = ean8.createFlowImage(Color(0, 0, 0))
+            img.setAlignment(Alignment.Left)
+            img.setSpacingBefore(4.0)
+            img.setSpacingAfter(10.0)
+            doc.add(img)
+        } catch (e: Exception) {
+            doc.add(Paragraph("5. EAN-8 error: ${e.message}", Font(helvBf, 10.0)))
+        }
+
+        // 6. PDF417
+        try {
+            doc.add(Paragraph("6. PDF417:", Font(helvBf, 12.0)))
             let pdf417 = BarcodePDF417("OpenPDF 2.0.3 PDF417 barcode demonstration")
-            pdf417.x = 72.0
-            pdf417.y = 200.0
-            pdf417.createImage(cb, Color(0, 0, 0), Color(255, 255, 255))
-            doc.add(Paragraph(" ", Font(helvBf, 30.0)))
+            let img = pdf417.createFlowImage(Color(0, 0, 0), 300.0, 80.0)
+            img.setAlignment(Alignment.Left)
+            img.setSpacingBefore(4.0)
+            img.setSpacingAfter(10.0)
+            doc.add(img)
         } catch (e: Exception) {
-            doc.add(Paragraph("5. PDF417 error: ${e.message}", Font(helvBf, 10.0)))
+            doc.add(Paragraph("6. PDF417 error: ${e.message}", Font(helvBf, 10.0)))
         }
 
-        // 6. Barcode128 with custom colors (blue bars)
-        doc.newPage()
+        // 7. Code-128 with custom colors (blue bars, red text)
         try {
-            doc.add(Paragraph("6. Code-128 with custom colors (blue bars):", Font(helvBf, 12.0)))
-            let colorBc = Barcode128("COLOR-DEMO")
-            colorBc.x = 72.0
-            colorBc.y = 760.0
-            colorBc.barHeight = 40.0
-            colorBc.moduleWidth = 2.0
-            colorBc.createImage(cb, Color(0, 0, 200), Color(200, 0, 0))
-            doc.add(Paragraph(" ", Font(helvBf, 50.0)))
+            doc.add(Paragraph("7. Code-128 with custom colors (blue bars, red text):", Font(helvBf, 12.0)))
+            let colorBarcode = Barcode128("COLOR-DEMO")
+            colorBarcode.barHeight = 40.0
+            let img = colorBarcode.createFlowImage(Color(0, 0, 255))
+            img.setAlignment(Alignment.Left)
+            img.setSpacingBefore(4.0)
+            img.setSpacingAfter(10.0)
+            doc.add(img)
         } catch (e: Exception) {
-            doc.add(Paragraph("6. Colored barcode error: ${e.message}", Font(helvBf, 10.0)))
+            doc.add(Paragraph("7. Colored barcode error: ${e.message}", Font(helvBf, 10.0)))
         }
 
-        // 7. CJK QR Code
+        // 8. UPC-A (approximated as EAN-13 with leading 0)
         try {
-            doc.add(Paragraph("7. QR Code with CJK content:", Font(helvBf, 12.0)))
-            let qrCjk = BarcodeQRCode("这是仓颉PDF库的二维码测试")
-            let qrCjkImg = qrCjk.createImage(cb, Color(0, 0, 0), Color(255, 255, 255))
-            qrCjkImg.setAbsolutePosition(72.0, 580.0)
-            doc.add(qrCjkImg)
+            doc.add(Paragraph("8. UPC-A:", Font(helvBf, 12.0)))
+            let upca = BarcodeEAN("001234567890")
+            upca.barHeight = 60.0
+            let img = upca.createFlowImage(Color(0, 0, 0))
+            img.setAlignment(Alignment.Left)
+            img.setSpacingBefore(4.0)
+            img.setSpacingAfter(10.0)
+            doc.add(img)
         } catch (e: Exception) {
-            doc.add(Paragraph("7. CJK QR Code error: ${e.message}", Font(helvBf, 10.0)))
+            doc.add(Paragraph("8. UPC-A error: ${e.message}", Font(helvBf, 10.0)))
         }
 
         doc.close()

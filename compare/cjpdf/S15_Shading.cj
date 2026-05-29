@@ -33,7 +33,7 @@ func s15_shading(): Unit {
         doc.add(Paragraph(" ", Font(helvBf, 4.0)))
 
         try {
-            let axial1 = PdfAxialShading(72.0, 680.0, Color(220, 0, 0), 450.0, 680.0, Color(0, 0, 220))
+            let axial1 = PdfAxialShading(72.0, 680.0, Color(255, 0, 0), 450.0, 680.0, Color(0, 0, 255))
             let patName1 = writer.addShadingPattern(PdfShadingPattern(axial1))
             cb.setColorFillPattern(patName1)
             cb.rectangle(72.0, 650.0, 378.0, 60.0)
@@ -48,7 +48,7 @@ func s15_shading(): Unit {
         doc.add(Paragraph(" ", Font(helvBf, 4.0)))
 
         try {
-            let axial2 = PdfAxialShading(72.0, 610.0, Color(255, 255, 0), 72.0, 570.0, Color(0, 180, 0))
+            let axial2 = PdfAxialShading(72.0, 610.0, Color(255, 255, 0), 72.0, 570.0, Color(0, 255, 0))
             let patName2 = writer.addShadingPattern(PdfShadingPattern(axial2))
             cb.setColorFillPattern(patName2)
             cb.rectangle(72.0, 570.0, 378.0, 60.0)
@@ -63,7 +63,7 @@ func s15_shading(): Unit {
         doc.add(Paragraph(" ", Font(helvBf, 4.0)))
 
         try {
-            let axial3 = PdfAxialShading(72.0, 530.0, Color(0, 220, 220), 450.0, 490.0, Color(220, 0, 220))
+            let axial3 = PdfAxialShading(72.0, 530.0, Color(0, 255, 255), 450.0, 490.0, Color(255, 0, 255))
             let patName3 = writer.addShadingPattern(PdfShadingPattern(axial3))
             cb.setColorFillPattern(patName3)
             cb.rectangle(72.0, 490.0, 378.0, 60.0)
@@ -108,12 +108,12 @@ func s15_shading(): Unit {
         doc.add(Paragraph(" ", Font(helvBf, 4.0)))
 
         let gradColorPairs = [
-            (Color(220, 0, 0),   Color(255, 255, 0)),
-            (Color(255, 255, 0), Color(0, 180, 0)),
-            (Color(0, 180, 0),   Color(0, 220, 220)),
-            (Color(0, 220, 220), Color(0, 0, 220)),
-            (Color(0, 0, 220),   Color(220, 0, 220)),
-            (Color(220, 0, 220), Color(220, 0, 0))
+            (Color(255, 0, 0),   Color(255, 255, 0)),
+            (Color(255, 255, 0), Color(0, 255, 0)),
+            (Color(0, 255, 0),   Color(0, 255, 255)),
+            (Color(0, 255, 255), Color(0, 0, 255)),
+            (Color(0, 0, 255),   Color(255, 0, 255)),
+            (Color(255, 0, 255), Color(255, 0, 0))
         ]
 
         for (i in 0..6) {
