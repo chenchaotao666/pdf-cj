@@ -28,10 +28,11 @@ func s08_image(): Unit {
         title.setSpacingAfter(20.0)
         doc.add(title)
 
-        // 1. river.jpg — scaleAbsolute
+        // 1. river.jpg — original size + scaleAbsolute
         try {
-            doc.add(Paragraph("1. river.jpg — scaleAbsolute(150, 100):", Font(helvBf, 11.0)))
+            doc.add(Paragraph("1. river.jpg — original size:", Font(helvBf, 11.0)))
             let img1 = Image.getInstance(_s08_IMG + "river.jpg")
+            doc.add(Paragraph("   Original: ${Int32(img1.plainWidth)}.0 x ${Int32(img1.plainHeight)}.0 px", Font(helvBf, 10.0)))
             img1.scaleAbsolute(150.0, 100.0)
             img1.setAlignment(Alignment.Left)
             img1.setSpacingBefore(4.0)
@@ -91,9 +92,9 @@ func s08_image(): Unit {
             doc.add(Paragraph("  5. error: ${e.message}", Font(helvBf, 10.0)))
         }
 
-        // 6. Alignment Center
+        // 6. Alignment Center (MIDDLE)
         try {
-            doc.add(Paragraph("6. mountain.png — ALIGN_CENTER:", Font(helvBf, 11.0)))
+            doc.add(Paragraph("6. mountain.png — ALIGN_MIDDLE:", Font(helvBf, 11.0)))
             let img6 = Image.getInstance(_s08_IMG + "mountain.png")
             img6.scaleAbsolute(120.0, 80.0)
             img6.setAlignment(Alignment.Center)
@@ -156,17 +157,25 @@ func s08_image(): Unit {
         // Force some space
         doc.add(Paragraph(" ", Font(helvBf, 60.0)))
 
-        // 11. spacingBefore/After
+        // 11. Wrap text around image (ALIGN_LEFT | TEXTWRAP)
         try {
-            doc.add(Paragraph("11. mountain.png — setSpacingBefore(20)/After(20):", Font(helvBf, 11.0)))
+            doc.add(Paragraph("11. Wrap text around image (ALIGN_LEFT | TEXTWRAP):", Font(helvBf, 11.0)))
             let img11 = Image.getInstance(_s08_IMG + "mountain.png")
-            img11.scaleAbsolute(150.0, 100.0)
-            img11.setAlignment(Alignment.Center)
-            img11.setSpacingBefore(20.0)
-            img11.setSpacingAfter(20.0)
+            img11.scaleAbsolute(120.0, 80.0)
+            img11.setAlignment(Alignment.Left)
+            img11.setTextWrap(true)
+            img11.setIndentationLeft(10.0)
+            img11.setSpacingBefore(6.0)
+            img11.setSpacingAfter(6.0)
             doc.add(img11)
+            doc.add(Paragraph(
+                "This text should wrap around the image on the right side. " +
+                "The image is aligned to the left with TEXTWRAP flag. " +
+                "More text to demonstrate the wrapping behavior in OpenPDF. " +
+                "Keep going to ensure we have enough text to wrap.",
+                Font(helvBf, 11.0)))
         } catch (e: Exception) {
-            doc.add(Paragraph("  11. spacing error: ${e.message}", Font(helvBf, 10.0)))
+            doc.add(Paragraph("  11. textwrap error: ${e.message}", Font(helvBf, 10.0)))
         }
 
         doc.close()
