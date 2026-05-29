@@ -69,6 +69,10 @@ public class Image <: Element {
     private var _spacingBefore: Float32 = 0.0
     private var _spacingAfter: Float32 = 0.0
 
+    // 文本环绕 & 左缩进
+    private var _textWrap: Bool = false
+    private var _indentationLeft: Float32 = 0.0
+
     // JPEG 内嵌 ICC Profile 数据（若存在）
     private var _iccProfile: ?Array<UInt8> = None
 
@@ -516,6 +520,22 @@ public class Image <: Element {
      */
     public prop spacingAfter: Float32 {
         get() { _spacingAfter }
+    }
+
+    public func setTextWrap(wrap: Bool): Unit {
+        this._textWrap = wrap
+    }
+
+    public prop textWrap: Bool {
+        get() { _textWrap }
+    }
+
+    public func setIndentationLeft(indent: Float32): Unit {
+        this._indentationLeft = indent
+    }
+
+    public prop indentationLeft: Float32 {
+        get() { _indentationLeft }
     }
 
     /**

@@ -30,6 +30,26 @@ public class PdfContentByte {
     public static let ALIGN_CENTER: Int32 = 1
     public static let ALIGN_RIGHT: Int32 = 2
 
+    // 文本渲染模式常量
+    public static let TEXT_RENDER_MODE_FILL: Int32 = 0
+    public static let TEXT_RENDER_MODE_STROKE: Int32 = 1
+    public static let TEXT_RENDER_MODE_FILL_STROKE: Int32 = 2
+    public static let TEXT_RENDER_MODE_INVISIBLE: Int32 = 3
+    public static let TEXT_RENDER_MODE_FILL_CLIP: Int32 = 4
+    public static let TEXT_RENDER_MODE_STROKE_CLIP: Int32 = 5
+    public static let TEXT_RENDER_MODE_FILL_STROKE_CLIP: Int32 = 6
+    public static let TEXT_RENDER_MODE_CLIP: Int32 = 7
+
+    // 线帽样式常量
+    public static let LINE_CAP_BUTT: Int32 = 0
+    public static let LINE_CAP_ROUND: Int32 = 1
+    public static let LINE_CAP_PROJECTING_SQUARE: Int32 = 2
+
+    // 线连接样式常量
+    public static let LINE_JOIN_MITER: Int32 = 0
+    public static let LINE_JOIN_ROUND: Int32 = 1
+    public static let LINE_JOIN_BEVEL: Int32 = 2
+
     public init(writer: PdfWriter) {
         this._writer = Some(writer)
     }

@@ -250,7 +250,7 @@ public class PdfOutline {
             dictionary.put(PdfName("Count"), PdfNumber(countValue))
         }
 
-        // 设置样式标志
+        // 设置样式标志（PDF spec：bit0=italic=1，bit1=bold=2）
         var flags: Int32 = 0
         if (italic) { flags = flags | 1 }
         if (bold) { flags = flags | 2 }

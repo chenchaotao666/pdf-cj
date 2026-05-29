@@ -6,6 +6,7 @@ package pdf_cj.core
 
 import std.io.OutputStream
 import std.collection.ArrayList
+import std.math.{sin, cos, abs}
 import pdf_cj.base.{
     PdfObject, PdfDictionary, PdfName, PdfNumber, PdfString, PdfArray,
     PdfStream, PdfIndirectReference, PdfOutputStream, PdfFileOutputStream, PdfBoolean
@@ -103,6 +104,9 @@ public class PdfWriter <: DocListener {
     private var _lastLeading: Float32 = 0.0
     // 等待放置的图片（与 OpenPDF imageWait 机制一致：当图片放不下时先缓存，下次换页时再放置）
     private var _imageWait: ?Image = None
+    // 文本环绕浮动块状态（当 image.textWrap=true 时激活）
+    private var _floatRight: Float32 = 0.0   // 浮动图片右边缘 X
+    private var _floatBottom: Float32 = 0.0  // 浮动图片底部 Y（当 _currentY <= 此值时浮动失效）
 
     // PDF 版本
     public static let PDF_VERSION_1_4 = "1.4"
@@ -318,6 +322,10 @@ public class PdfWriter <: DocListener {
 
         // 重置绘图位置
         _currentY = _pageSize.height - _marginTop
+
+        // 清除文本环绕浮动状态（新页从头开始）
+        _floatRight = 0.0
+        _floatBottom = 0.0
 
         // 与 OpenPDF 一致：新页时若有缓存的 imageWait 则立即放置
         match (_imageWait) {
@@ -749,8 +757,13 @@ public class PdfWriter <: DocListener {
         // 通知段落开始
         fireOnParagraph(_currentY)
 
-        // 计算段落可用宽度（首行有额外缩进）
-        let leftX = _marginLeft + para.indentationLeft
+        // 计算段落可用宽度（若有浮动图片则从图片右侧开始）
+        let baseLeftX = if (_floatRight > 0.0 && _currentY > _floatBottom) {
+            _floatRight
+        } else {
+            _marginLeft
+        }
+        let leftX = baseLeftX + para.indentationLeft
         let firstLineLeftX = leftX + para.firstLineIndent
         let rightX = _pageSize.width - _marginRight - para.indentationRight
 
@@ -975,6 +988,16 @@ public class PdfWriter <: DocListener {
         // 段后间距
         _currentY -= para.spacingAfter
 
+        // 若浮动图片仍有效且文本已排完，确保 Y 游标不高于浮动底部
+        if (_floatRight > 0.0 && _currentY > _floatBottom) {
+            _currentY = _floatBottom
+        }
+        // 文本排完后清除浮动状态
+        if (_floatRight > 0.0 && _currentY <= _floatBottom) {
+            _floatRight = 0.0
+            _floatBottom = 0.0
+        }
+
         // 记录本段落 leading，供后续空段落复用（与 OpenPDF 行为一致）
         _lastLeading = para.leading
 
@@ -1070,6 +1093,13 @@ public class PdfWriter <: DocListener {
 
         let imageWidth = image.scaledWidth
         let imageHeight = image.scaledHeight
+        let theta = image.rotationRadians
+
+        // 计算旋转后的包围盒尺寸（用于布局）
+        let cosT = Float32(cos(Float64(theta)))
+        let sinT = Float32(sin(Float64(theta)))
+        let bboxWidth  = imageWidth  * Float32(abs(Float64(cosT))) + imageHeight * Float32(abs(Float64(sinT)))
+        let bboxHeight = imageWidth  * Float32(abs(Float64(sinT))) + imageHeight * Float32(abs(Float64(cosT)))
 
         // 若设置了绝对坐标，直接放置，不影响文档流
         if (image.hasAbsolutePosition) {
@@ -1079,7 +1109,7 @@ public class PdfWriter <: DocListener {
             encryptStream(imageXObject, imageObjNum)
             let imageRef = _body.add(imageXObject, imageObjNum)
             let imageName = _resources.addXObject(imageRef)
-            drawImage(imageName, image.absoluteX, image.absoluteY, imageWidth, imageHeight)
+            drawImage(imageName, image.absoluteX, image.absoluteY, imageWidth, imageHeight, theta)
             return true
         }
 
@@ -1090,7 +1120,7 @@ public class PdfWriter <: DocListener {
         // 与 OpenPDF imageWait 机制一致：
         // - 第一次放不下：缓存图片（imageWait），恢复 _currentY，继续处理后续元素
         // - 第二次放不下（imageWait 已有值）：强制换页（换页时 imageWait 会被放置），再处理本图片
-        if (_currentY - imageHeight < _marginBottom) {
+        if (_currentY - bboxHeight < _marginBottom) {
             match (_imageWait) {
                 case None =>
                     // 第一次：缓存，恢复游标，延迟到下一页放置
@@ -1117,24 +1147,33 @@ public class PdfWriter <: DocListener {
         let imageRef = _body.add(imageXObject, imageObjNum)
         let imageName = _resources.addXObject(imageRef)
 
-        // 计算图片位置
+        // 计算图片位置（以包围盒为基准）
         let pageWidth = _pageSize.width - _marginLeft - _marginRight
 
         let imageX = match (image.alignment) {
-            case Alignment.Left => _marginLeft
-            case Alignment.Center => _marginLeft + (pageWidth - imageWidth) / 2.0
-            case Alignment.Right => _marginLeft + pageWidth - imageWidth
+            case Alignment.Left => _marginLeft + image.indentationLeft
+            case Alignment.Center => _marginLeft + (pageWidth - bboxWidth) / 2.0
+            case Alignment.Right => _marginLeft + pageWidth - bboxWidth
             case _ => _marginLeft
         }
 
-        // 计算 Y 位置（PDF 坐标系从下往上）
-        let imageY = _currentY - imageHeight
-
-        // 绘制图片
-        drawImage(imageName, imageX, imageY, imageWidth, imageHeight)
-
-        // 更新 Y 位置
-        _currentY -= imageHeight
+        if (image.textWrap) {
+            // 文本环绕模式：图片浮动在左侧，文本从右侧流过
+            let imgTop = _currentY - image.spacingBefore
+            let imgBottom = imgTop - bboxHeight
+            let imageY = imgBottom
+            drawImage(imageName, imageX, imageY, imageWidth, imageHeight, theta)
+            // 设置浮动状态，后续段落将在右侧排版
+            _floatRight = imageX + bboxWidth
+            _floatBottom = imgBottom - image.spacingAfter
+            // Y 游标只前进 spacingBefore，让文本从图片顶部开始
+            _currentY -= image.spacingBefore
+        } else {
+            // 普通模式：图片占满整个宽度，Y 游标下移完整高度
+            let imageY = _currentY - bboxHeight
+            drawImage(imageName, imageX, imageY, imageWidth, imageHeight, theta)
+            _currentY -= bboxHeight
+        }
 
         true
     }
@@ -1522,18 +1561,36 @@ public class PdfWriter <: DocListener {
     /**
      * 绘制图片到内容流
      */
-    private func drawImage(imageName: String, x: Float32, y: Float32, width: Float32, height: Float32): Unit {
-        // 保存图形状态
+    // x, y: lower-left of the bounding box; theta: rotation in radians (counterclockwise)
+    private func drawImage(imageName: String, x: Float32, y: Float32,
+                           width: Float32, height: Float32, theta: Float32): Unit {
         getContent().saveState()
 
-        // 设置变换矩阵：缩放并平移图片
-        // PDF 的图片默认是 1x1 单位，需要缩放到实际大小
-        getContent().concatCTM(width, 0.0, 0.0, height, x, y)
+        if (theta == 0.0) {
+            getContent().concatCTM(width, 0.0, 0.0, height, x, y)
+        } else {
+            let cosT = Float32(cos(Float64(theta)))
+            let sinT = Float32(sin(Float64(theta)))
+            let a = width  * cosT
+            let b = width  * sinT
+            let c = -height * sinT
+            let d =  height * cosT
+            // Compute lower-left offset of original image origin within bounding box
+            // x0, y0: offset so that the bounding box lower-left lands at (x, y)
+            var xMin: Float32 = 0.0
+            if (a   < xMin) { xMin = a   }
+            if (c   < xMin) { xMin = c   }
+            if (a+c < xMin) { xMin = a+c }
+            var yMin: Float32 = 0.0
+            if (b   < yMin) { yMin = b   }
+            if (d   < yMin) { yMin = d   }
+            if (b+d < yMin) { yMin = b+d }
+            let x0 = -xMin
+            let y0 = -yMin
+            getContent().concatCTM(a, b, c, d, x + x0, y + y0)
+        }
 
-        // 绘制 XObject
         getContent().addXObject(imageName)
-
-        // 恢复图形状态
         getContent().restoreState()
     }
 
