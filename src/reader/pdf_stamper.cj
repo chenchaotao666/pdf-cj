@@ -6,7 +6,7 @@ package pdf_cj.reader
 
 import std.collection.{HashMap, ArrayList}
 import pdf_cj.base.*
-import pdf_cj.core.PdfContentByte
+import pdf_cj.core.{PdfContentByte, PdfGState}
 import pdf_cj.util.{Rectangle, PdfException}
 
 /**
@@ -34,6 +34,10 @@ public class PdfStamper {
 
     // AcroFields 缓存
     private var acroFieldsInstance: ?AcroFields = None
+
+    // 每页的扩展图形状态（ExtGState）资源：pageNum → (gsName → gsDict)
+    private var pageGStates: HashMap<Int32, HashMap<String, PdfDictionary>> = HashMap<Int32, HashMap<String, PdfDictionary>>()
+    private var gsCounter: Int32 = 0
 
     // 下一个可用对象编号
     private var nextObjectNumber: Int32
@@ -81,6 +85,24 @@ public class PdfStamper {
                 acroFieldsInstance = Some(af)
                 af
         }
+    }
+
+    /**
+     * 为指定页注册 ExtGState，返回资源名（如 "GS1"）
+     * 之后在该页的 PdfContentByte 中调用 setExtGState(name) 引用它
+     */
+    public func addGState(pageNum: Int32, gs: PdfGState): String {
+        gsCounter += 1
+        let name = "GS${gsCounter}"
+        let gsDict = gs.toDictionary()
+        match (pageGStates.get(pageNum)) {
+            case Some(m) => m[name] = gsDict
+            case None =>
+                let m = HashMap<String, PdfDictionary>()
+                m[name] = gsDict
+                pageGStates[pageNum] = m
+        }
+        name
     }
 
     /**
@@ -323,16 +345,29 @@ public class PdfStamper {
 
         // 复制原始页面字典中的其他条目
         let pageDict = getPageDict(pageNum)
+        let pageGsMap = pageGStates.get(pageNum)
+        let hasGStates = match (pageGsMap) { case Some(m) => m.size > 0; case None => false }
         match (pageDict) {
             case Some(d) =>
                 let ks = d.keys()
                 for (i in 0..ks.size) {
                     let k = ks[i]
                     if (k == "Type" || k == "Contents") { continue }
+                    // Resources 有 GState 时单独处理（合并 ExtGState）
+                    if (k == "Resources" && hasGStates) { continue }
                     match (d.get(PdfName(k))) {
                         case Some(v) =>
                             os.writeString(" /${k} ")
                             v.writeTo(os)
+                        case None => ()
+                    }
+                }
+                // 合并写 Resources（带 ExtGState）
+                if (hasGStates) {
+                    match (pageGsMap) {
+                        case Some(gsMap) =>
+                            os.writeString(" /Resources ")
+                            writeResourcesWithGState(os, d, gsMap)
                         case None => ()
                     }
                 }
@@ -380,6 +415,76 @@ public class PdfStamper {
         } else {
             None
         }
+    }
+
+    /**
+     * 将原始 Resources 字典与新增 ExtGState 合并后内联写出
+     */
+    private func writeResourcesWithGState(
+        os: PdfOutputStream,
+        pageDict: PdfDictionary,
+        gsMap: HashMap<String, PdfDictionary>
+    ): Unit {
+        // 解析原始 Resources（可能是间接引用）
+        var resDict: ?PdfDictionary = None
+        match (pageDict.get(PdfName("Resources"))) {
+            case Some(ref: PdfIndirectReference) =>
+                match (reader.getObject(ref)) {
+                    case Some(d: PdfDictionary) => resDict = Some(d)
+                    case _ => ()
+                }
+            case Some(d: PdfDictionary) => resDict = Some(d)
+            case _ => ()
+        }
+
+        os.writeString("<< ")
+        // 复制所有原始 Resources 条目（跳过 ExtGState，稍后合并写）
+        match (resDict) {
+            case Some(res) =>
+                let rks = res.keys()
+                for (i in 0..rks.size) {
+                    let k = rks[i]
+                    if (k == "ExtGState") { continue }
+                    match (res.get(PdfName(k))) {
+                        case Some(v) =>
+                            os.writeString("/${k} ")
+                            v.writeTo(os)
+                            os.writeString(" ")
+                        case None => ()
+                    }
+                }
+            case None => ()
+        }
+
+        // 合并写 ExtGState
+        os.writeString("/ExtGState << ")
+        // 先写原有 ExtGState 条目
+        match (resDict) {
+            case Some(res) =>
+                match (res.get(PdfName("ExtGState"))) {
+                    case Some(egd: PdfDictionary) =>
+                        let eks = egd.keys()
+                        for (i in 0..eks.size) {
+                            let k = eks[i]
+                            match (egd.get(PdfName(k))) {
+                                case Some(v) =>
+                                    os.writeString("/${k} ")
+                                    v.writeTo(os)
+                                    os.writeString(" ")
+                                case None => ()
+                            }
+                        }
+                    case _ => ()
+                }
+            case None => ()
+        }
+        // 再写新增的 GState 条目
+        for ((gsName, gsDict) in gsMap) {
+            os.writeString("/${gsName} ")
+            gsDict.writeTo(os)
+            os.writeString(" ")
+        }
+        os.writeString(">> >>")
     }
 
     /**

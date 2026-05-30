@@ -6,7 +6,7 @@ package pdf_cj.reader
 
 import std.collection.{HashMap, ArrayList}
 import pdf_cj.base.*
-import pdf_cj.api.Document
+import pdf_cj.api.{Document, DocListener, Element, HeaderFooter}
 import pdf_cj.util.Rectangle
 
 // ─── 内部：收集到的页面记录 ────────────────────────────────────────────────────
@@ -313,7 +313,7 @@ private func contentFingerprint(bytes: Array<UInt8>): String {
  * PDF 合并器
  * 将多个源 PDF 的页面合并写入一个新 PDF
  */
-public class PdfCopy {
+public class PdfCopy <: DocListener {
     private var document: Document
     var outputStream: PdfOutputStream
     private var addedPages: ArrayList<PageEntry> = ArrayList<PageEntry>()
@@ -322,13 +322,24 @@ public class PdfCopy {
     public init(document: Document, os: PdfOutputStream) {
         this.document = document
         this.outputStream = os
+        document.addDocListener(this)
     }
+
+    public func add(element: Element): Bool { true }
+    public func open(): Unit {}
+    public func newPage(): Bool { true }
+    public func setPageSize(size: Rectangle): Bool { true }
+    public func setMargins(left: Float32, right: Float32, top: Float32, bottom: Float32): Bool { true }
+    public func setHeader(header: HeaderFooter): Unit {}
+    public func setFooter(footer: HeaderFooter): Unit {}
+    public func resetHeader(): Unit {}
+    public func resetFooter(): Unit {}
 
     /**
      * 从源文档取得导入页面句柄
      */
     public func getImportedPage(reader: PdfReader, pageNum: Int32): PdfImportedPage {
-        PdfImportedPage(reader, pageNum, this)
+        PdfImportedPage(reader, pageNum)
     }
 
     /**
@@ -407,13 +418,11 @@ public class PdfCopy {
 public class PdfImportedPage {
     private var reader: PdfReader
     private var pageNumber: Int32
-    private var copy: PdfCopy
     private var mediaBox: ?Rectangle = None
 
-    public init(reader: PdfReader, pageNum: Int32, copy: PdfCopy) {
+    public init(reader: PdfReader, pageNum: Int32) {
         this.reader = reader
         this.pageNumber = pageNum
-        this.copy = copy
         this.mediaBox = Some(reader.getPageSize(pageNum))
     }
 
@@ -446,7 +455,7 @@ public class PdfImportedPage {
  * 智能合并器
  * 与 PdfCopy 相同，但相同内容的页面只写一份内容流对象（去重）
  */
-public class PdfSmartCopy {
+public class PdfSmartCopy <: DocListener {
     var outputStream: PdfOutputStream
     private var document: Document
     private var addedPages: ArrayList<PageEntry> = ArrayList<PageEntry>()
@@ -462,10 +471,21 @@ public class PdfSmartCopy {
     public init(document: Document, os: PdfOutputStream) {
         this.document = document
         this.outputStream = os
+        document.addDocListener(this)
     }
 
+    public func add(element: Element): Bool { true }
+    public func open(): Unit {}
+    public func newPage(): Bool { true }
+    public func setPageSize(size: Rectangle): Bool { true }
+    public func setMargins(left: Float32, right: Float32, top: Float32, bottom: Float32): Bool { true }
+    public func setHeader(header: HeaderFooter): Unit {}
+    public func setFooter(footer: HeaderFooter): Unit {}
+    public func resetHeader(): Unit {}
+    public func resetFooter(): Unit {}
+
     public func getImportedPage(reader: PdfReader, pageNum: Int32): PdfImportedPage {
-        PdfImportedPage(reader, pageNum, PdfCopy(document, outputStream))
+        PdfImportedPage(reader, pageNum)
     }
 
     /**

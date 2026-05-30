@@ -1,7 +1,7 @@
 package pdf_cj_examples
 
 import pdf_cj.api.{Document, Paragraph, Phrase, Chunk}
-import pdf_cj.core.{PdfWriter, PdfContentByte}
+import pdf_cj.core.{PdfWriter, PdfContentByte, PdfGState}
 import pdf_cj.form.PdfFormFieldFactory
 import pdf_cj.reader.{PdfReader, PdfStamper}
 import pdf_cj.base.PdfFileOutputStream
@@ -84,18 +84,24 @@ func s17_readerStamper(): Unit {
 
             // Add watermark to each page
             for (page in 1..(numPages + 1)) {
+                let pageNum = Int32(page)
                 // Over content (on top)
-                let over = stamper.getOverContent(Int32(page))
+                let over = stamper.getOverContent(pageNum)
                 over.saveState()
+                // Transparency: fill opacity 0.15 (matches Java)
+                let gs = PdfGState()
+                gs.setFillAlpha(0.15)
+                let gsName = stamper.addGState(pageNum, gs)
+                over.setExtGState(gsName)
                 over.beginText()
-                over.setFontAndSize("Helvetica", 60.0)
-                over.setColorFill(Color(220, 0, 0))
-                over.showTextAligned(PdfContentByte.ALIGN_CENTER, "WATERMARK", 297.0, 421.0, 45.0)
+                over.setFontAndSize(helvBf, "Helvetica", 60.0)
+                over.setColorFill(Color(255, 0, 0))  // Color.RED
+                over.showTextAligned(PdfContentByte.ALIGN_CENTER, "WATERMARK", 297.0, 420.0, 45.0)
                 over.endText()
                 over.restoreState()
 
                 // Under content (background)
-                let under = stamper.getUnderContent(Int32(page))
+                let under = stamper.getUnderContent(pageNum)
                 under.saveState()
                 under.setColorFill(Color(240, 248, 255))
                 under.rectangle(0.0, 0.0, 595.0, 842.0)
@@ -104,8 +110,8 @@ func s17_readerStamper(): Unit {
 
                 // Page label
                 over.beginText()
-                over.setFontAndSize("Helvetica", 9.0)
-                over.setColorFill(Color(80, 80, 80))
+                over.setFontAndSize(helvBf, "Helvetica", 9.0)
+                over.setColorFill(Color(64, 64, 64))  // Color.DARK_GRAY
                 over.setTextMatrix(72.0, 20.0)
                 over.showText("Stamped — Page ${page} of ${numPages}")
                 over.endText()
