@@ -267,14 +267,15 @@ public class ColumnText {
         var linesDrawn: Int64 = 0
 
         for (i in 0..allLines.size) {
-            if (_currentY - lineHeight < _lly) {
+            _currentY -= lineHeight
+            if (_currentY < _lly) {
+                _currentY += lineHeight
                 break
             }
             let lineX = if (i == 0) { leftX + para.firstLineIndent } else { leftX }
             if (!simulate) {
                 drawLine(allLines[i], lineX, _currentY)
             }
-            _currentY -= lineHeight
             linesDrawn += 1
         }
 
@@ -337,12 +338,28 @@ public class ColumnText {
 
             _canvas.beginText()
             _canvas.setFontAndSize(fontName, seg.font.size)
-            match (seg.color) {
-                case Some(c) => _canvas.setColorFill(c)
-                case None => _canvas.setColorFill(Color.BLACK)
+            let fillColor = match (seg.color) {
+                case Some(c) => c
+                case None => Color.BLACK
             }
+            _canvas.setColorFill(fillColor)
+
+            let bfName = baseFont.name
+            let needsBoldSim = seg.font.isBold() && (baseFont.isTrueType() || !bfName.contains("Bold"))
+            if (needsBoldSim) {
+                _canvas.setColorStroke(fillColor)
+                _canvas.setTextRenderingMode(2)
+                _canvas.setLineWidth(seg.font.size / 30.0)
+            }
+
             _canvas.setTextMatrix(x, lineY)
             _canvas.showText(seg.text, useUnicode, Some(baseFont))
+
+            if (needsBoldSim) {
+                _canvas.setTextRenderingMode(0)
+                _canvas.setLineWidth(1.0)
+            }
+
             _canvas.endText()
 
             x += baseFont.getWidthPoint(seg.text, seg.font.size)
@@ -355,7 +372,9 @@ public class ColumnText {
     private func processPhrase(phrase: Phrase, simulate: Bool): Int32 {
         let lineHeight = if (_leading > 0.0) { _leading } else { phrase.leading }
 
-        if (_currentY - lineHeight < _lly) {
+        _currentY -= lineHeight
+        if (_currentY < _lly) {
+            _currentY += lineHeight
             return NO_MORE_COLUMN
         }
 
@@ -363,7 +382,6 @@ public class ColumnText {
             drawPhrase(phrase)
         }
 
-        _currentY -= lineHeight
         _compositeElements.remove(0..1)
         CONTINUE_PROCESSING
     }
@@ -384,12 +402,28 @@ public class ColumnText {
 
             _canvas.beginText()
             _canvas.setFontAndSize(fontName, font.size)
-            match (chunk.color) {
-                case Some(c) => _canvas.setColorFill(c)
-                case None => _canvas.setColorFill(Color.BLACK)
+            let fillColor = match (chunk.color) {
+                case Some(c) => c
+                case None => Color.BLACK
             }
+            _canvas.setColorFill(fillColor)
+
+            let bfName = baseFont.name
+            let needsBoldSim = font.isBold() && (baseFont.isTrueType() || !bfName.contains("Bold"))
+            if (needsBoldSim) {
+                _canvas.setColorStroke(fillColor)
+                _canvas.setTextRenderingMode(2)
+                _canvas.setLineWidth(font.size / 30.0)
+            }
+
             _canvas.setTextMatrix(x, _currentY)
             _canvas.showText(chunk.content, useUnicode, Some(baseFont))
+
+            if (needsBoldSim) {
+                _canvas.setTextRenderingMode(0)
+                _canvas.setLineWidth(1.0)
+            }
+
             _canvas.endText()
 
             x += baseFont.getWidthPoint(chunk.content, font.size)

@@ -567,6 +567,52 @@ public class PdfReader {
     public func getObjectByNumber(objNum: Int32): ?PdfObject {
         resolveRef(objNum)
     }
+
+    /**
+     * 获取指定页（从 1 开始）的页面字典
+     */
+    public func getPageDictionary(pageNum: Int32): ?PdfDictionary {
+        let idx = Int64(pageNum - 1)
+        if (idx >= 0 && idx < pageList.size) {
+            Some(pageList[idx])
+        } else {
+            None
+        }
+    }
+
+    /**
+     * 获取指定对象号的 stream 原始字节
+     */
+    public func getRawStreamByObjNum(objNum: Int32): Array<UInt8> {
+        match (xrefTable) {
+            case Some(xref) =>
+                let off = xref.getOffset(objNum)
+                if (off >= 0) { readRawStreamAt(off) } else { Array<UInt8>(0, repeat: 0) }
+            case None => Array<UInt8>(0, repeat: 0)
+        }
+    }
+
+    /**
+     * 判断指定对象号是否为流对象
+     */
+    public func isStreamObject(objNum: Int32): Bool {
+        match (xrefTable) {
+            case Some(xref) =>
+                let off = xref.getOffset(objNum)
+                if (off < 0) { return false }
+                let tok = PdfTokenizer(fileData)
+                tok.setPosition(off)
+                tok.nextToken()
+                tok.nextToken()
+                tok.nextToken()
+                PdfParser(tok).parseObject()
+                match (tok.peekToken()) {
+                    case Some(t) => t.getValue() == "stream"
+                    case None => false
+                }
+            case None => false
+        }
+    }
 }
 
 /**

@@ -1,12 +1,11 @@
 package pdf_cj_examples
 
-import pdf_cj.api.{Document, Paragraph, Phrase, Chunk}
+import pdf_cj.api.{Document, Paragraph}
 import pdf_cj.core.PdfWriter
 import pdf_cj.reader.{PdfReader, TextExtractor}
-import pdf_cj.text.{BaseFont, Font, FontStyle, Color, Alignment}
-import pdf_cj.util.{PageSize, Rectangle}
+import pdf_cj.text.{Font, FontStyle}
+import pdf_cj.util.PageSize
 import std.fs.{File, OpenMode, Path}
-import std.collection.HashMap
 
 let _s19_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 let _s19_OUT  = "output/"
@@ -33,12 +32,11 @@ func s19CreateSourcePdf(): Unit {
     doc.add(Paragraph("Known text line 2: Pack my box with five dozen liquor jugs.", Font(helvBf, 11.0)))
     doc.add(Paragraph("Known text line 3: 中文文字提取测试内容。", Font(cjkBf, 11.0)))
     doc.add(Paragraph("Numbers: 1234567890", Font(helvBf, 11.0)))
-    doc.add(Paragraph("Special: !@#$%^&*()", Font(helvBf, 11.0)))
+    doc.add(Paragraph("Special: !@#$%^&*()_+", Font(helvBf, 11.0)))
 
     doc.newPage()
     doc.add(Paragraph("Page 2 of 2", Font(helvBf, 14.0, FontStyle.Bold)))
     doc.add(Paragraph("Second page content for extraction.", Font(helvBf, 11.0)))
-    doc.add(Paragraph("第二页内容 — 这是第二页的中文文字。", Font(cjkBf, 11.0)))
 
     doc.close()
 }
@@ -57,6 +55,8 @@ func s19_textExtract(): Unit {
         println("Number of pages: ${reader.getNumberOfPages()}")
         let pg1 = reader.getPageSize(1i32)
         println("Page 1 size: ${pg1.width} x ${pg1.height}")
+        let pg2 = reader.getPageSize(2i32)
+        println("Page 2 size: ${pg2.width} x ${pg2.height}")
         println("PDF version: ${reader.getPdfVersion()}")
 
         // Get document info

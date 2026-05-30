@@ -9,15 +9,134 @@ import pdf_cj.base.*
 import pdf_cj.api.{Document, DocListener, Element, HeaderFooter}
 import pdf_cj.util.Rectangle
 
+// ─── 存储对象（资源收集器使用） ────────────────────────────────────────────────
+
+class StoredStreamObj {
+    var objNum: Int32
+    var streamDict: PdfDictionary
+    var bytes: Array<UInt8>
+
+    init(n: Int32, d: PdfDictionary, b: Array<UInt8>) {
+        objNum = n
+        streamDict = d
+        bytes = b
+    }
+}
+
+class StoredRegularObj {
+    var objNum: Int32
+    var obj: PdfObject
+
+    init(n: Int32, o: PdfObject) {
+        objNum = n
+        obj = o
+    }
+}
+
+// ─── 资源收集器 ────────────────────────────────────────────────────────────────
+
+class ResourceCollector {
+    var nextObjNum: Int32 = 3
+    var objMapping: HashMap<String, Int32> = HashMap<String, Int32>()
+    var streamObjs: ArrayList<StoredStreamObj> = ArrayList<StoredStreamObj>()
+    var regularObjs: ArrayList<StoredRegularObj> = ArrayList<StoredRegularObj>()
+
+    init() {}
+
+    func readerObjKey(reader: PdfReader, srcObjNum: Int32): String {
+        reader.getFileName() + ":" + "${srcObjNum}"
+    }
+
+    func remapObject(obj: PdfObject, reader: PdfReader): PdfObject {
+        match (obj) {
+            case ref: PdfIndirectReference =>
+                let newNum = getOrAllocate(ref.objectNumber, reader)
+                PdfIndirectReference(newNum, 0)
+            case d: PdfDictionary =>
+                let newDict = PdfDictionary()
+                for (key in d.keys()) {
+                    match (d.get(PdfName(key))) {
+                        case Some(v) => newDict.put(PdfName(key), remapObject(v, reader))
+                        case None => ()
+                    }
+                }
+                newDict
+            case arr: PdfArray =>
+                let newArr = PdfArray()
+                for (i in 0..arr.size) {
+                    newArr.add(remapObject(arr.get(i), reader))
+                }
+                newArr
+            case _ => obj
+        }
+    }
+
+    func getOrAllocate(srcObjNum: Int32, reader: PdfReader): Int32 {
+        let key = readerObjKey(reader, srcObjNum)
+        match (objMapping.get(key)) {
+            case Some(n) => return n
+            case None => ()
+        }
+        let newNum = nextObjNum
+        nextObjNum += 1
+        objMapping[key] = newNum
+
+        match (reader.getObjectByNumber(srcObjNum)) {
+            case None => ()
+            case Some(obj) =>
+                if (reader.isStreamObject(srcObjNum)) {
+                    let streamDict = match (obj) {
+                        case d: PdfDictionary => d
+                        case _ => PdfDictionary()
+                    }
+                    let remappedDict = match (remapObject(streamDict, reader)) {
+                        case d: PdfDictionary => d
+                        case _ => PdfDictionary()
+                    }
+                    let rawBytes = reader.getRawStreamByObjNum(srcObjNum)
+                    remappedDict.put(PdfName("Length"), PdfNumber(Int64(rawBytes.size)))
+                    streamObjs.add(StoredStreamObj(newNum, remappedDict, rawBytes))
+                } else {
+                    let remapped = remapObject(obj, reader)
+                    regularObjs.add(StoredRegularObj(newNum, remapped))
+                }
+        }
+        newNum
+    }
+
+    func getRemappedResources(pageDict: PdfDictionary, reader: PdfReader): PdfObject {
+        match (pageDict.get(PdfName("Resources"))) {
+            case Some(ref: PdfIndirectReference) =>
+                remapObject(ref, reader)
+            case Some(d: PdfDictionary) =>
+                remapObject(d, reader)
+            case _ =>
+                let minimal = PdfDictionary()
+                let procSet = PdfArray()
+                procSet.add(PdfName("PDF"))
+                procSet.add(PdfName("Text"))
+                procSet.add(PdfName("ImageB"))
+                procSet.add(PdfName("ImageC"))
+                procSet.add(PdfName("ImageI"))
+                minimal.put(PdfName("ProcSet"), procSet)
+                minimal
+        }
+    }
+}
+
 // ─── 内部：收集到的页面记录 ────────────────────────────────────────────────────
 
 class PageEntry {
     var contentBytes: Array<UInt8>
     var mediaBox: Rectangle
+    var remappedResources: PdfObject
+    var fingerprint: String
 
-    init(content: Array<UInt8>, box: Rectangle) {
+    init(content: Array<UInt8>, box: Rectangle, resources: PdfObject, fp: String) {
         contentBytes = content
         mediaBox = box
+        remappedResources = resources
+        fingerprint = fp
     }
 }
 
@@ -157,133 +276,7 @@ private func xrefEntry(offset: Int64, gen: Int32, flag: String): String {
     padLeft10(offset) + " " + padLeft5(gen) + " ${flag} \r\n"
 }
 
-/**
- * 将收集到的页面写出为完整的新 PDF
- *
- * 对象布局（共 2+N*2 个对象）：
- *   obj 1          : Catalog
- *   obj 2          : Pages root
- *   obj 3+i*2      : 第 i+1 页的内容流（或去重后复用的对象号）
- *   obj 4+i*2      : 第 i+1 页的页面字典
- */
-private func writePdfFromPages(os: PdfOutputStream, pages: ArrayList<PageEntry>,
-                               contentObjNums: ArrayList<Int32>): Unit {
-    let n = pages.size
-    // 对象总数：1(Catalog) + 1(Pages) + n(content streams, 可能有去重) + n(page dicts)
-    // 但 xref 需要覆盖所有对象号，所以用最大对象号+1作为 /Size
-    // 计算最大对象号
-    var maxObjNum: Int32 = 2
-    for (i in 0..contentObjNums.size) {
-        let cn = contentObjNums[i]
-        if (cn > maxObjNum) { maxObjNum = cn }
-        let pn = 3 + Int32(i) * 2  // 等价的页面字典编号
-        if (pn > maxObjNum) { maxObjNum = pn }
-    }
-    // 页面字典对象号为偶数：4, 6, 8, ... = 4+i*2
-    // 内容流对象号由调用方通过 contentObjNums[i] 传入
-    // 页面字典: 对于第 i 页 (0-indexed), objNum = 3 + i*2 + 1 = 4 + i*2
-
-    // 跟踪每个对象号的写入偏移
-    // 最大对象号 = 2 + n*2（无去重时）
-    // 用 HashMap 记录 objNum -> offset
-    let offsets = HashMap<Int32, Int64>()
-
-    os.writeString("%PDF-1.4\n")
-
-    // obj 1: Catalog
-    offsets[1] = os.position
-    os.writeString("1 0 obj\n")
-    os.writeString("<< /Type /Catalog /Pages 2 0 R >>\n")
-    os.writeString("endobj\n")
-
-    // 先构建 Kids 数组字符串
-    var kidsStr = "["
-    for (i in 0..n) {
-        let pageDictObjNum = 4 + Int32(i) * 2
-        if (i > 0) { kidsStr += " " }
-        kidsStr += "${pageDictObjNum} 0 R"
-    }
-    kidsStr += "]"
-
-    // obj 2: Pages root
-    offsets[2] = os.position
-    os.writeString("2 0 obj\n")
-    os.writeString("<< /Type /Pages /Kids ${kidsStr} /Count ${n} >>\n")
-    os.writeString("endobj\n")
-
-    // 写内容流（去重：相同 objNum 只写一次）
-    let writtenContentObjs = HashMap<Int32, Bool>()
-
-    for (i in 0..n) {
-        let contentObjNum = contentObjNums[i]
-        if (!writtenContentObjs.contains(contentObjNum)) {
-            writtenContentObjs[contentObjNum] = true
-            offsets[contentObjNum] = os.position
-            let bytes = pages[i].contentBytes
-            os.writeString("${contentObjNum} 0 obj\n")
-            os.writeString("<< /Length ${bytes.size} >>\n")
-            os.writeString("stream\n")
-            os.writeBytes(bytes)
-            os.writeString("\nendstream\nendobj\n")
-        }
-    }
-
-    // 写页面字典
-    for (i in 0..n) {
-        let pageDictObjNum = 4 + Int32(i) * 2
-        let contentObjNum = contentObjNums[i]
-        let box = pages[i].mediaBox
-        offsets[pageDictObjNum] = os.position
-        os.writeString("${pageDictObjNum} 0 obj\n")
-        os.writeString("<< /Type /Page /Parent 2 0 R")
-        os.writeString(" /MediaBox [")
-        os.writeFloat32(box.left)
-        os.writeString(" ")
-        os.writeFloat32(box.bottom)
-        os.writeString(" ")
-        os.writeFloat32(box.right)
-        os.writeString(" ")
-        os.writeFloat32(box.top)
-        os.writeString("]")
-        os.writeString(" /Resources << /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] >>")
-        os.writeString(" /Contents ${contentObjNum} 0 R")
-        os.writeString(" >>\n")
-        os.writeString("endobj\n")
-    }
-
-    // 收集所有对象号，排序后写 xref
-    let allObjNums = ArrayList<Int32>()
-    for ((objNum, _) in offsets) {
-        allObjNums.add(objNum)
-    }
-    sortAscending(allObjNums)
-
-    let xrefStart = os.position
-    os.writeString("xref\n")
-    // free entry for obj 0
-    os.writeString("0 1\n")
-    os.writeString(xrefEntry(0, 65535, "f"))
-    // one subsection per object
-    for (i in 0..allObjNums.size) {
-        let objNum = allObjNums[i]
-        let offset = match (offsets.get(objNum)) {
-            case Some(o) => o
-            case None => Int64(0)
-        }
-        os.writeString("${objNum} 1\n")
-        os.writeString(xrefEntry(offset, 0, "n"))
-    }
-
-    let totalObjs = allObjNums.size + 1  // +1 for obj 0
-    let rootRef = 1
-
-    os.writeString("trailer\n")
-    os.writeString("<< /Size ${totalObjs} /Root ${rootRef} 0 R >>\n")
-    os.writeString("startxref\n${xrefStart}\n%%EOF\n")
-}
-
 private func sortAscending(list: ArrayList<Int32>): Unit {
-    // Insertion sort (page counts are small)
     let n = list.size
     var i: Int64 = 1
     while (i < n) {
@@ -307,17 +300,132 @@ private func contentFingerprint(bytes: Array<UInt8>): String {
     "${bytes.size}_${sum}"
 }
 
+/**
+ * 将收集到的页面和资源写出为完整的新 PDF
+ *
+ * 对象布局：
+ *   obj 1           : Catalog
+ *   obj 2           : Pages root
+ *   obj 3..(2+R)    : 资源对象（流对象和普通对象，由 collector 分配）
+ *   obj (3+R)..     : 内容流（每页一个，SmartCopy 时去重）
+ *   obj (3+R+C)..   : 页面字典（每页一个）
+ */
+private func writePdfNew(os: PdfOutputStream, pages_: ArrayList<PageEntry>,
+                          collector_: ResourceCollector,
+                          contentObjNums: ArrayList<Int32>,
+                          firstPageDict: Int32): Unit {
+    let n = pages_.size
+    let offsets = HashMap<Int32, Int64>()
+
+    os.writeString("%PDF-1.4\n")
+
+    // obj 1: Catalog
+    offsets[1] = os.position
+    os.writeString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+
+    // Build Kids array
+    var kidsStr = "["
+    for (i in 0..n) {
+        let pdNum = firstPageDict + Int32(i)
+        if (i > 0) { kidsStr += " " }
+        kidsStr += "${pdNum} 0 R"
+    }
+    kidsStr += "]"
+
+    // obj 2: Pages root
+    offsets[2] = os.position
+    os.writeString("2 0 obj\n<< /Type /Pages /Kids ${kidsStr} /Count ${n} >>\nendobj\n")
+
+    // Write stream resource objects
+    for (i in 0..collector_.streamObjs.size) {
+        let so = collector_.streamObjs[i]
+        offsets[so.objNum] = os.position
+        os.writeString("${so.objNum} 0 obj\n")
+        so.streamDict.writeTo(os)
+        os.writeString("\nstream\n")
+        os.writeBytes(so.bytes)
+        os.writeString("\nendstream\nendobj\n")
+    }
+
+    // Write regular resource objects
+    for (i in 0..collector_.regularObjs.size) {
+        let ro = collector_.regularObjs[i]
+        offsets[ro.objNum] = os.position
+        os.writeString("${ro.objNum} 0 obj\n")
+        ro.obj.writeTo(os)
+        os.writeString("\nendobj\n")
+    }
+
+    // Write content streams (deduped by content obj num)
+    let writtenContent = HashMap<Int32, Bool>()
+    for (i in 0..n) {
+        let cnum = contentObjNums[i]
+        if (!writtenContent.contains(cnum)) {
+            writtenContent[cnum] = true
+            offsets[cnum] = os.position
+            let bytes = pages_[i].contentBytes
+            os.writeString("${cnum} 0 obj\n<< /Length ${bytes.size} >>\nstream\n")
+            os.writeBytes(bytes)
+            os.writeString("\nendstream\nendobj\n")
+        }
+    }
+
+    // Write page dicts
+    for (i in 0..n) {
+        let pdNum = firstPageDict + Int32(i)
+        let cnum = contentObjNums[i]
+        let box = pages_[i].mediaBox
+        offsets[pdNum] = os.position
+        os.writeString("${pdNum} 0 obj\n")
+        os.writeString("<< /Type /Page /Parent 2 0 R /MediaBox [")
+        os.writeFloat32(box.left)
+        os.writeString(" ")
+        os.writeFloat32(box.bottom)
+        os.writeString(" ")
+        os.writeFloat32(box.right)
+        os.writeString(" ")
+        os.writeFloat32(box.top)
+        os.writeString("] /Resources ")
+        pages_[i].remappedResources.writeTo(os)
+        os.writeString(" /Contents ${cnum} 0 R >>\nendobj\n")
+    }
+
+    // Write xref table
+    let allObjNums = ArrayList<Int32>()
+    for ((objNum, _) in offsets) {
+        allObjNums.add(objNum)
+    }
+    sortAscending(allObjNums)
+
+    let xrefStart = os.position
+    os.writeString("xref\n0 1\n")
+    os.writeString(xrefEntry(0, 65535, "f"))
+    for (i in 0..allObjNums.size) {
+        let objNum = allObjNums[i]
+        let off = match (offsets.get(objNum)) {
+            case Some(o) => o
+            case None => Int64(0)
+        }
+        os.writeString("${objNum} 1\n")
+        os.writeString(xrefEntry(off, 0, "n"))
+    }
+
+    let totalObjs = allObjNums.size + 1
+    os.writeString("trailer\n<< /Size ${totalObjs} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n")
+}
+
 // ─── PdfCopy ──────────────────────────────────────────────────────────────────
 
 /**
  * PDF 合并器
- * 将多个源 PDF 的页面合并写入一个新 PDF
+ * 将多个源 PDF 的页面合并写入一个新 PDF，同时复制字体、图像等资源对象
  */
 public class PdfCopy <: DocListener {
     private var document: Document
     var outputStream: PdfOutputStream
     private var addedPages: ArrayList<PageEntry> = ArrayList<PageEntry>()
     private var closed: Bool = false
+    private var collector: ResourceCollector = ResourceCollector()
 
     public init(document: Document, os: PdfOutputStream) {
         this.document = document
@@ -335,28 +443,27 @@ public class PdfCopy <: DocListener {
     public func resetHeader(): Unit {}
     public func resetFooter(): Unit {}
 
-    /**
-     * 从源文档取得导入页面句柄
-     */
     public func getImportedPage(reader: PdfReader, pageNum: Int32): PdfImportedPage {
         PdfImportedPage(reader, pageNum)
     }
 
-    /**
-     * 将导入页面加入合并列表
-     */
     public func addPage(page: PdfImportedPage): Unit {
         let content = page.getContent()
         let box = match (page.getMediaBox()) {
             case Some(b) => b
             case None => Rectangle(0.0, 0.0, 595.0, 842.0)
         }
-        addedPages.add(PageEntry(content, box))
+        let reader = page.getReader()
+        let pageNum = page.getPageNumber()
+        let pageDict = match (reader.getPageDictionary(pageNum)) {
+            case Some(d) => d
+            case None => PdfDictionary()
+        }
+        let resources = collector.getRemappedResources(pageDict, reader)
+        let fp = contentFingerprint(content)
+        addedPages.add(PageEntry(content, box, resources, fp))
     }
 
-    /**
-     * 将整个源文档的所有页面加入合并列表
-     */
     public func addDocument(reader: PdfReader): Unit {
         let n = reader.getNumberOfPages()
         for (i in 1..(n + 1)) {
@@ -364,11 +471,6 @@ public class PdfCopy <: DocListener {
         }
     }
 
-    /**
-     * 按页面范围字符串从源文档选取页面加入合并列表
-     * @param reader 源文档
-     * @param ranges 页面范围，如 "1-3,5,7-9"
-     */
     public func selectPages(reader: PdfReader, ranges: String): Unit {
         let pageNums = parsePageRanges(ranges, reader.getNumberOfPages())
         for (i in 0..pageNums.size) {
@@ -376,35 +478,23 @@ public class PdfCopy <: DocListener {
         }
     }
 
-    /**
-     * 解析页面范围字符串，返回页码列表（不限最大页码）
-     */
     public static func parseRanges(ranges: String): ArrayList<Int32> {
         parsePageRanges(ranges, 0)
     }
 
-    /**
-     * 已加入的页面总数
-     */
-    public func getPageCount(): Int64 {
-        addedPages.size
-    }
+    public func getPageCount(): Int64 { addedPages.size }
 
-    /**
-     * 完成合并，将结果写入输出流
-     * 内容流不去重（相同内容会写两份），使用 PdfSmartCopy 可以去重
-     */
     public func close(): Unit {
         if (closed) { return }
         closed = true
-
-        // 每页分配独立的内容流对象号：3, 5, 7, ...
+        let n = addedPages.size
+        let firstContent = collector.nextObjNum
         let contentObjNums = ArrayList<Int32>()
-        for (i in 0..addedPages.size) {
-            contentObjNums.add(3 + Int32(i) * 2)
+        for (i in 0..n) {
+            contentObjNums.add(firstContent + Int32(i))
         }
-
-        writePdfFromPages(outputStream, addedPages, contentObjNums)
+        let firstPageDict = firstContent + Int32(n)
+        writePdfNew(outputStream, addedPages, collector, contentObjNums, firstPageDict)
     }
 
     public func isClosed(): Bool { closed }
@@ -460,13 +550,9 @@ public class PdfSmartCopy <: DocListener {
     private var document: Document
     private var addedPages: ArrayList<PageEntry> = ArrayList<PageEntry>()
     private var closed: Bool = false
-
-    // 内容指纹 → 已分配的内容流对象号
-    private var contentObjMap: HashMap<String, Int32> = HashMap<String, Int32>()
-    // 每页实际使用的内容流对象号（可能被多页共享）
-    private var pageContentObjNums: ArrayList<Int32> = ArrayList<Int32>()
-    // 下一个可分配的对象号（从3开始，步长2，给内容流用）
-    private var nextContentObjNum: Int32 = 3
+    private var collector: ResourceCollector = ResourceCollector()
+    private var fingerprintSet: HashMap<String, Bool> = HashMap<String, Bool>()
+    private var uniqueFingerprintCount: Int32 = 0
 
     public init(document: Document, os: PdfOutputStream) {
         this.document = document
@@ -488,30 +574,25 @@ public class PdfSmartCopy <: DocListener {
         PdfImportedPage(reader, pageNum)
     }
 
-    /**
-     * 添加页面，自动去重相同内容流
-     */
     public func addPage(page: PdfImportedPage): Unit {
         let content = page.getContent()
         let box = match (page.getMediaBox()) {
             case Some(b) => b
             case None => Rectangle(0.0, 0.0, 595.0, 842.0)
         }
-        let fingerprint = contentFingerprint(content)
-
-        let contentObjNum = match (contentObjMap.get(fingerprint)) {
-            case Some(existing) => existing
-            case None =>
-                let newNum = nextContentObjNum
-                // 内容流对象号：3,5,7,...；页面字典：4,6,8,...
-                // 去重时跳过已用号码：我们只分配奇数给内容流
-                nextContentObjNum += 2
-                contentObjMap[fingerprint] = newNum
-                newNum
+        let reader = page.getReader()
+        let pageNum = page.getPageNumber()
+        let pageDict = match (reader.getPageDictionary(pageNum)) {
+            case Some(d) => d
+            case None => PdfDictionary()
         }
-
-        addedPages.add(PageEntry(content, box))
-        pageContentObjNums.add(contentObjNum)
+        let resources = collector.getRemappedResources(pageDict, reader)
+        let fp = contentFingerprint(content)
+        if (!fingerprintSet.contains(fp)) {
+            fingerprintSet[fp] = true
+            uniqueFingerprintCount += 1
+        }
+        addedPages.add(PageEntry(content, box, resources, fp))
     }
 
     public func addDocument(reader: PdfReader): Unit {
@@ -530,20 +611,30 @@ public class PdfSmartCopy <: DocListener {
 
     public func getPageCount(): Int64 { addedPages.size }
 
-    public func getDedupedContentCount(): Int64 { Int64(contentObjMap.size) }
+    public func getDedupedContentCount(): Int64 { Int64(uniqueFingerprintCount) }
 
     public func close(): Unit {
         if (closed) { return }
         closed = true
-
-        // 页面字典对象号需要与 writePdfFromPages 内的计算保持一致：
-        // writePdfFromPages 中 pageDictObjNum = 4 + i*2
-        // 内容流对象号由调用方通过 pageContentObjNums 传入
-        // 但 writePdfFromPages 用固定公式 4+i*2 计算页面字典对象号
-        // 需要确保内容流对象号不与 4+i*2 冲突
-        // 当前内容流号从 3 开始步长 2 → 3,5,7,... 不会与 4,6,8,... 冲突 ✓
-
-        writePdfFromPages(outputStream, addedPages, pageContentObjNums)
+        let n = addedPages.size
+        let firstContent = collector.nextObjNum
+        let fpToObjNum = HashMap<String, Int32>()
+        var nextContentNum = firstContent
+        let contentObjNums = ArrayList<Int32>()
+        for (i in 0..n) {
+            let fp = addedPages[i].fingerprint
+            let objNum = match (fpToObjNum.get(fp)) {
+                case Some(existing) => existing
+                case None =>
+                    let newN = nextContentNum
+                    nextContentNum += 1
+                    fpToObjNum[fp] = newN
+                    newN
+            }
+            contentObjNums.add(objNum)
+        }
+        let firstPageDict = nextContentNum
+        writePdfNew(outputStream, addedPages, collector, contentObjNums, firstPageDict)
     }
 
     public func isClosed(): Bool { closed }

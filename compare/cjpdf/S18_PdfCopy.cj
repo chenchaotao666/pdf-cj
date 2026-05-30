@@ -1,11 +1,12 @@
 package pdf_cj_examples
 
-import pdf_cj.api.{Document, Paragraph, Phrase, Chunk}
+import pdf_cj.api.{Document, Paragraph}
 import pdf_cj.core.PdfWriter
 import pdf_cj.reader.{PdfReader, PdfCopy, PdfSmartCopy}
 import pdf_cj.base.PdfFileOutputStream
-import pdf_cj.text.{BaseFont, Font, FontStyle, Color, Alignment}
-import pdf_cj.util.{PageSize, Rectangle}
+import pdf_cj.image.Image
+import pdf_cj.text.{Font, FontStyle, Color, Alignment}
+import pdf_cj.util.{PageSize}
 import std.fs.{File, OpenMode, Path}
 
 let _s18_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
@@ -27,6 +28,13 @@ func s18CreatePdfA(): Unit {
         doc.add(p)
         doc.add(Paragraph("Document A, page ${i} of 3.", Font(helvBf, 12.0)))
         doc.add(Paragraph("Content: The quick brown fox jumps over the lazy dog.", Font(helvBf, 11.0)))
+        if (i == 1) {
+            try {
+                let img = Image.getInstance(_s18_IMG + "mountain.png")
+                img.scaleAbsolute(100.0, 70.0)
+                doc.add(img)
+            } catch (e: Exception) {}
+        }
     }
     doc.close()
 }
@@ -45,6 +53,13 @@ func s18CreatePdfB(): Unit {
         doc.add(p)
         doc.add(Paragraph("Document B, page ${i} of 2.", Font(helvBf, 12.0)))
         doc.add(Paragraph("CJK: 这是文档B第${i}页。", Font(cjkBf, 12.0)))
+        if (i == 1) {
+            try {
+                let img = Image.getInstance(_s18_IMG + "mountain.png")
+                img.scaleAbsolute(100.0, 70.0)
+                doc.add(img)
+            } catch (e: Exception) {}
+        }
     }
     doc.close()
 }
@@ -135,6 +150,28 @@ func s18_pdfCopy(): Unit {
             println("  Smart copy PDF: ${_s18_OUT}cj_s18_smart_copy.pdf")
         } catch (e: Exception) {
             println("  PdfSmartCopy error: ${e.message}")
+        }
+
+        // ---- Part 4: Copy individual pages ----
+        try {
+            let readerA4 = PdfReader(_s18_OUT + "cj_s18_source_a.pdf")
+            let readerB4 = PdfReader(_s18_OUT + "cj_s18_source_b.pdf")
+            let indivDoc = Document()
+            let indivFile = File(Path(_s18_OUT + "cj_s18_individual_pages.pdf"), OpenMode.Write)
+            let indivCopy = PdfCopy(indivDoc, PdfFileOutputStream(indivFile))
+            indivDoc.open()
+
+            // Copy page 2 from A, page 1 from B, page 3 from A
+            indivCopy.addPage(indivCopy.getImportedPage(readerA4, 2))
+            indivCopy.addPage(indivCopy.getImportedPage(readerB4, 1))
+            indivCopy.addPage(indivCopy.getImportedPage(readerA4, 3))
+
+            readerA4.close()
+            readerB4.close()
+            indivDoc.close()
+            println("  Individual pages copy: ${_s18_OUT}cj_s18_individual_pages.pdf")
+        } catch (e: Exception) {
+            println("  Individual pages error: ${e.message}")
         }
 
         println("  S18 done")

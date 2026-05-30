@@ -25,7 +25,9 @@ let _s21_ARTICLE_LEFT =
     "Cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat. " +
     "Cupidatat non proident, sunt in culpa qui officia deserunt mollit. " +
     "Anim id est laborum. Sed ut perspiciatis unde omnis iste natus error. " +
-    "Sit voluptatem accusantium doloremque laudantium, totam rem aperiam. "
+    "Sit voluptatem accusantium doloremque laudantium, totam rem aperiam. " +
+    "Eaque ipsa quae ab illo inventore veritatis et quasi architecto. " +
+    "Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit. "
 
 let _s21_ARTICLE_RIGHT =
     "右栏内容：这是右侧栏的中文文章内容，用于展示ColumnText的多栏排版功能。" +
@@ -34,7 +36,7 @@ let _s21_ARTICLE_RIGHT =
     "通过setSimpleColumn方法可以设置栏的边界，通过go方法可以渲染内容。" +
     "当内容超出当前栏的边界时，可以检测溢出状态并翻页继续排版。" +
     "这种能力使得pdf-cj非常适合用于生成复杂的报告、书籍和杂志等文档。" +
-    "Right column: Text layout in multiple columns. " +
+    "Right column: Text extraction and layout in multiple columns. " +
     "ColumnText supports both simple columns and complex custom shapes. " +
     "You can mix CJK and Latin text in the same column layout. " +
     "The overflow handling ensures all content is properly rendered. " +
@@ -75,7 +77,7 @@ func s21_columnText(): Unit {
 
         // Title
         cb.beginText()
-        cb.setFontAndSize(cjkBf, _s21_CJK_NAME, 16.0)
+        cb.setFontAndSize(cjkBf, _s21_CJK_NAME, 18.0)
         cb.showTextAligned(PdfContentByte.ALIGN_CENTER, "S21: ColumnText Demo — 多栏排版", pageWidth / 2.0, pageHeight - 50.0, 0.0)
         cb.endText()
 
@@ -91,7 +93,7 @@ func s21_columnText(): Unit {
         // Build content for both columns
         var ct1 = ColumnText(cb)
         ct1.setAlignment(Alignment.Justified)
-        ct1.setLeading(16.0)
+        ct1.setLeading(0.0, 1.4)
 
         var leftHeader = Paragraph("Left Column: English Article", Font(helvBf, 12.0, FontStyle.Bold))
         leftHeader.setSpacingAfter(8.0)
@@ -106,8 +108,10 @@ func s21_columnText(): Unit {
 
         var ct2 = ColumnText(cb)
         ct2.setAlignment(Alignment.Justified)
-        ct2.setLeading(16.0)
+        ct2.setLeading(0.0, 1.4)
         ct2.setIndent(10.0)
+        ct2.setFollowingIndent(0.0)
+        ct2.setRightIndent(5.0)
 
         var rightHeader = Paragraph("右栏：中文文章", Font(cjkBf, 12.0, FontStyle.Bold))
         rightHeader.setSpacingAfter(8.0)
@@ -142,11 +146,11 @@ func s21_columnText(): Unit {
 
                 ct1 = ColumnText(cb)
                 ct1.setAlignment(Alignment.Justified)
-                ct1.setLeading(16.0)
+                ct1.setLeading(0.0, 1.4)
 
                 ct2 = ColumnText(cb)
                 ct2.setAlignment(Alignment.Justified)
-                ct2.setLeading(16.0)
+                ct2.setLeading(0.0, 1.4)
             }
 
             // Render left column
