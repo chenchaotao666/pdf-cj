@@ -281,6 +281,14 @@ public open class Section <: Element {
     public prop subsectionSize: Int64 {
         get() { _subsections.size }
     }
+
+    public prop content: ArrayList<Element> {
+        get() { _content }
+    }
+
+    public prop subsections: ArrayList<Section> {
+        get() { _subsections }
+    }
 }
 
 /**

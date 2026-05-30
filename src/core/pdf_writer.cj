@@ -11,7 +11,7 @@ import pdf_cj.base.{
     PdfObject, PdfDictionary, PdfName, PdfNumber, PdfString, PdfArray,
     PdfStream, PdfIndirectReference, PdfOutputStream, PdfFileOutputStream, PdfBoolean
 }
-import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phrase, Chunk, HeaderFooter, Anchor}
+import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phrase, Chunk, HeaderFooter, Anchor, Section, Chapter}
 import pdf_cj.util.{Rectangle, PageSize, PdfException}
 import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
@@ -52,6 +52,8 @@ public class PdfWriter <: DocListener {
     // 当前绘图位置
     private var _currentY: Float32 = 0.0
     private var _pageNumber: Int32 = 0
+    // 当前页是否已写入内容（用于 Chapter 换页时避免产生空白页）
+    private var _pageHasContent: Bool = false
 
     // 页眉页脚
     private var _header: ?HeaderFooter = None
@@ -307,11 +309,17 @@ public class PdfWriter <: DocListener {
      * 新页面
      */
     public func newPage(): Bool {
+        // 当前页无内容时跳过（与 OpenPDF 一致：避免 Chapter 换页产生空白页）
+        if (_currentPage.isSome() && !_pageHasContent) {
+            return false
+        }
+
         // 完成当前页面
         if (_currentPage.isSome()) {
             finishCurrentPage()
         }
 
+        _pageHasContent = false
         _pageNumber += 1
 
         // 预留页面对象编号（供书签 Destination 引用和 completePage 写入使用）
@@ -535,6 +543,65 @@ public class PdfWriter <: DocListener {
             case Chunk => addChunk(element)
             case Table => addTable(element)
             case Image => addImage(element)
+            case Chapter | Section => addSectionElement(element)
+            case _ => false
+        }
+    }
+
+    private func addSectionElement(element: Element): Bool {
+        processSectionWithIndent(element, 0.0, None)
+    }
+
+    // parentIndent: 父节点已累积的缩进量；parentOutline: 父书签节点
+    private func processSectionWithIndent(
+        element: Element, parentIndent: Float32, parentOutline: ?PdfOutline
+    ): Bool {
+        match (element) {
+            case section: Section =>
+                let myIndent = parentIndent + section.indentationLeft
+
+                // 标题：使用本节累积缩进，同时生成书签
+                var sectionOutline: ?PdfOutline = None
+                match (section.title) {
+                    case Some(t) =>
+                        // 提取标题文本用于书签
+                        var titleText = ""
+                        for (chunk in t.getChunks()) { titleText += chunk.content }
+
+                        // 书签指向当前页顶部
+                        let dest = PdfDestination(getCurrentPageReference())
+                        let outline = PdfOutline(titleText, dest)
+                        match (parentOutline) {
+                            case Some(p) => p.addChild(outline)
+                            case None => getOutlineTree().addOutline(outline)
+                        }
+                        sectionOutline = Some(outline)
+
+                        // 标题段落使用本节缩进
+                        let orig = t.indentationLeft
+                        t.setIndentationLeft(orig + myIndent)
+                        _ = add(t)
+                        t.setIndentationLeft(orig)
+                    case None => ()
+                }
+
+                // 内容段落：使用本节累积缩进
+                for (elem in section.content) {
+                    match (elem) {
+                        case para: Paragraph =>
+                            let orig = para.indentationLeft
+                            para.setIndentationLeft(orig + myIndent)
+                            _ = add(para)
+                            para.setIndentationLeft(orig)
+                        case _ => _ = add(elem)
+                    }
+                }
+
+                // 子节递归，传入本节累积缩进和当前书签节点
+                for (sub in section.subsections) {
+                    _ = processSectionWithIndent(sub, myIndent, sectionOutline)
+                }
+                true
             case _ => false
         }
     }
@@ -764,6 +831,7 @@ public class PdfWriter <: DocListener {
     }
 
     private func processParagraph(para: Paragraph): Bool {
+        _pageHasContent = true
         // 重置两端对齐的跨行复用参数（每个新段落独立计算）
         _prevJustifyTc = 0.0
         _prevJustifyTw = 0.0
@@ -1087,6 +1155,7 @@ public class PdfWriter <: DocListener {
      * 添加表格
      */
     private func addTable(element: Element): Bool {
+        _pageHasContent = true
         match (element) {
             case table: PdfPTable => processTable(table)
             case _ => false
@@ -1097,6 +1166,7 @@ public class PdfWriter <: DocListener {
      * 添加图片
      */
     private func addImage(element: Element): Bool {
+        _pageHasContent = true
         match (element) {
             case image: Image => processImage(image)
             case _ => false

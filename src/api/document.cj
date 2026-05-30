@@ -435,9 +435,7 @@ public class Document <: ElementListener {
      * 处理章节元素（章节从新页面开始）
      */
     private func handleChapter(): Unit {
-        if (_pageNumber > 1) {
-            newPage()
-        }
+        newPage()
     }
 
     // ===== 监听器管理 =====

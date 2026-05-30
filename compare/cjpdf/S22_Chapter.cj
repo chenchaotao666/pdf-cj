@@ -1,9 +1,9 @@
 package pdf_cj_examples
 
-import pdf_cj.api.{Document, Paragraph, Phrase, Chunk, Chapter, Section}
+import pdf_cj.api.{Document, Paragraph, Chapter, Section}
 import pdf_cj.core.PdfWriter
-import pdf_cj.text.{BaseFont, Font, FontStyle, Color, Alignment}
-import pdf_cj.util.{PageSize, Rectangle}
+import pdf_cj.text.{Font, FontStyle, Color, Alignment}
+import pdf_cj.util.PageSize
 import std.fs.{File, OpenMode, Path}
 
 let _s22_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
