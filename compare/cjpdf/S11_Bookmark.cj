@@ -31,7 +31,10 @@ func s11_bookmark(): Unit {
 
         // ---- Chapter 1 ----
         doc.add(Paragraph(" ", Font(helvBf, 4.0)))
-        var ch1Title = Paragraph("Chapter 1: Introduction", Font(cjkBf, 16.0, FontStyle.Bold))
+        var ch1Title = Paragraph()
+        let ch1Anchor = Chunk("Chapter 1: Introduction", Font(cjkBf, 16.0, FontStyle.Bold))
+        _ = ch1Anchor.setLocalDestination("chapter1_dest")
+        _ = ch1Title.add(ch1Anchor)
         ch1Title.setSpacingBefore(10.0)
         doc.add(ch1Title)
         doc.add(Paragraph("This is the introduction chapter. It covers basics.", Font(helvBf, 12.0)))
@@ -43,7 +46,10 @@ func s11_bookmark(): Unit {
         doc.add(Paragraph("  Section 1.1 content: Getting started with OpenPDF.", Font(helvBf, 11.0)))
         doc.add(Paragraph("  入门内容：如何开始使用OpenPDF。", Font(cjkBf, 11.0)))
 
-        var sec12Title = Paragraph("  1.2 Basic Concepts", Font(helvBf, 13.0, FontStyle.Bold))
+        var sec12Title = Paragraph()
+        let sec12Anchor = Chunk("  1.2 Basic Concepts", Font(helvBf, 13.0, FontStyle.Bold))
+        _ = sec12Anchor.setLocalDestination("sec12_dest")
+        _ = sec12Title.add(sec12Anchor)
         sec12Title.setSpacingBefore(12.0)
         doc.add(sec12Title)
         doc.add(Paragraph("  Section 1.2 content: Basic concepts in PDF generation.", Font(helvBf, 11.0)))

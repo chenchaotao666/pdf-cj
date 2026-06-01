@@ -254,6 +254,18 @@ public class BaseFont {
     // 标准 14 字体 AFM 逐字符宽度（1/1000 em 单位，WinAnsi 编码 ASCII 段）
     private func getBuiltInCharWidth(c: UInt32): Int32 {
         if (c < 32u32 && c != 9u32) { return 0 }  // control chars have no advance width except tab (9)
+        // U+0100 以上的字符只有以下 WinAnsi 扩展码点有映射，其余渲染时被跳过 → 宽度 0
+        if (c > 0xFFu32) {
+            match (c) {
+                case 0x20ACu32 | 0x201Au32 | 0x0192u32 | 0x201Eu32 | 0x2026u32 |
+                     0x2020u32 | 0x2021u32 | 0x02C6u32 | 0x2030u32 | 0x0160u32 |
+                     0x2039u32 | 0x0152u32 | 0x017Du32 | 0x2018u32 | 0x2019u32 |
+                     0x201Cu32 | 0x201Du32 | 0x2022u32 | 0x2013u32 | 0x2014u32 |
+                     0x02DCu32 | 0x2122u32 | 0x0161u32 | 0x203Au32 | 0x0153u32 |
+                     0x017Eu32 | 0x0178u32 => ()  // WinAnsi 扩展，继续计算宽度
+                case _ => return 0  // 不在 WinAnsi，渲染跳过，宽度 0
+            }
+        }
         match (fontName) {
             case "Helvetica" | "Helvetica-Oblique" => afmHelvetica(c)
             case "Helvetica-Bold" | "Helvetica-BoldOblique" => afmHelveticaBold(c)

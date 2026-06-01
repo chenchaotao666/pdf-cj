@@ -188,6 +188,12 @@ public class PdfAnnotationLink <: PdfAnnotation {
     public init(rect: Rectangle) {
         super(AnnotationType.Link, rect)
         dictionary.put(PdfName("Subtype"), PdfName("Link"))
+        // 默认隐藏边框，与 OpenPDF 行为一致
+        let noBorder = PdfArray()
+        noBorder.add(PdfNumber(0))
+        noBorder.add(PdfNumber(0))
+        noBorder.add(PdfNumber(0))
+        dictionary.put(PdfName("Border"), noBorder)
     }
 
     /**

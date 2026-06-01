@@ -16,7 +16,7 @@ import pdf_cj.util.{Rectangle, PageSize, PdfException}
 import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
 import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser, Jp2Parser}
-import pdf_cj.form.{PdfAnnotation, PdfAnnotationFactory, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination}
+import pdf_cj.form.{PdfAnnotation, PdfAnnotationFactory, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination, PdfActionGoTo}
 import pdf_cj.codec.FlateEncoder
 import pdf_cj.security.PdfEncryption
 import zlib4cj.{Zlib, ZlibType}
@@ -54,6 +54,8 @@ public class PdfWriter <: DocListener {
     private var _pageNumber: Int32 = 0
     // 当前页是否已写入内容（用于 Chapter 换页时避免产生空白页）
     private var _pageHasContent: Bool = false
+    // 是否在页面顶部（换页后第一个段落不应用 spacingBefore，与 OpenPDF 一致）
+    private var _atPageTop: Bool = true
 
     // 页眉页脚
     private var _header: ?HeaderFooter = None
@@ -88,6 +90,9 @@ public class PdfWriter <: DocListener {
 
     // 所有表单字段引用（按写入顺序，在 completePage 中收集，close() 时写入 AcroForm）
     private var _allFieldRefs: ArrayList<PdfIndirectReference> = ArrayList<PdfIndirectReference>()
+
+    // 命名目标：[(name, pageRef, y)]，关闭时写入 /Names /Dests
+    private var _namedDests: ArrayList<(String, PdfIndirectReference, Float32)> = ArrayList<(String, PdfIndirectReference, Float32)>()
 
     // 书签树
     private var _outlineTree: ?PdfOutlineTree = None
@@ -248,6 +253,27 @@ public class PdfWriter <: DocListener {
             _catalog.setAcroForm(acroForm)
         }
 
+        // 写入命名目标（setLocalDestination / setLocalGoto 使用）
+        if (_namedDests.size > 0) {
+            let namesArr = PdfArray()
+            for (i in 0.._namedDests.size) {
+                let (name, pageRef, y) = _namedDests[i]
+                namesArr.add(PdfString(name))
+                let destArr = PdfArray()
+                destArr.add(pageRef)
+                destArr.add(PdfName("XYZ"))
+                destArr.add(PdfNumber(0))
+                destArr.add(PdfNumber(y))
+                destArr.add(PdfNumber(0))
+                namesArr.add(destArr)
+            }
+            let destsDict = PdfDictionary()
+            destsDict.put(PdfName("Names"), namesArr)
+            let namesDict = PdfDictionary()
+            namesDict.put(PdfName("Dests"), destsDict)
+            _catalog.dictionary.put(PdfName("Names"), namesDict)
+        }
+
         // 写入书签树（如果有）
         match (_outlineTree) {
             case Some(tree) =>
@@ -321,7 +347,16 @@ public class PdfWriter <: DocListener {
      */
     public func newPage(): Bool {
         // 当前页无内容时跳过（与 OpenPDF 一致：避免 Chapter 换页产生空白页）
-        if (_currentPage.isSome() && !_pageHasContent) {
+        // 同时检查 PdfContentByte 是否有直接写入的内容（如 S09 通过 cb 绘图）
+        let cbHasContent = match (_currentContent) {
+            case Some(c) => !c.isEmpty()
+            case None => false
+        }
+        let directHasContent = match (_directContent) {
+            case Some(c) => !c.isEmpty()
+            case None => false
+        }
+        if (_currentPage.isSome() && !_pageHasContent && !cbHasContent && !directHasContent) {
             return false
         }
 
@@ -331,6 +366,7 @@ public class PdfWriter <: DocListener {
         }
 
         _pageHasContent = false
+        _atPageTop = true
         _pageNumber += 1
 
         // 预留页面对象编号（供书签 Destination 引用和 completePage 写入使用）
@@ -498,6 +534,14 @@ public class PdfWriter <: DocListener {
     }
 
     /**
+     * 注册命名目标（用于文档内部跳转的锚点）
+     */
+    private func addNamedDestination(name: String, y: Float32): Unit {
+        let pageRef = PdfIndirectReference(_currentPageObjNum)
+        _namedDests.add((name, pageRef, y))
+    }
+
+    /**
      * 设置页面大小
      */
     public func setPageSize(size: Rectangle): Bool {
@@ -561,39 +605,79 @@ public class PdfWriter <: DocListener {
     }
 
     private func addSectionElement(element: Element): Bool {
-        processSectionWithIndent(element, 0.0, None)
+        match (element) {
+            case chapter: Chapter =>
+                let nums = ArrayList<Int32>()
+                nums.add(chapter.chapterNumber)
+                processSectionWithIndent(chapter, 0.0, None, nums)
+            case section: Section =>
+                processSectionWithIndent(section, 0.0, None, ArrayList<Int32>())
+            case _ => false
+        }
     }
 
-    // parentIndent: 父节点已累积的缩进量；parentOutline: 父书签节点
+    // parentIndent: 父节点已累积的缩进量；parentOutline: 父书签节点；nums: 本节绝对序号路径
     private func processSectionWithIndent(
-        element: Element, parentIndent: Float32, parentOutline: ?PdfOutline
+        element: Element, parentIndent: Float32, parentOutline: ?PdfOutline,
+        nums: ArrayList<Int32>
     ): Bool {
         match (element) {
             case section: Section =>
                 let myIndent = parentIndent + section.indentationLeft
 
-                // 标题：使用本节累积缩进，同时生成书签
+                // 构建前缀：取 nums 末尾 numberDepth 个元素，格式 "N1.N2. "（与 Java 一致）
+                var prefix = ""
+                if (section.numberDepth > 0 && nums.size > 0) {
+                    let showCount = if (Int64(section.numberDepth) < nums.size) {
+                        Int64(section.numberDepth)
+                    } else {
+                        nums.size
+                    }
+                    let startIdx = nums.size - showCount
+                    for (i in startIdx..nums.size) {
+                        if (i > startIdx) { prefix += "." }
+                        prefix += "${nums[i]}"
+                    }
+                    prefix += ". "
+                }
+
+                // 标题：构建带前缀的渲染段落，渲染前记录 Y 坐标用于书签
                 var sectionOutline: ?PdfOutline = None
                 match (section.title) {
                     case Some(t) =>
-                        // 提取标题文本用于书签
-                        var titleText = ""
-                        for (chunk in t.getChunks()) { titleText += chunk.content }
+                        // 构建渲染段落：前缀 chunk（若有）+ 原始 chunks
+                        let renderPara = Paragraph()
+                        renderPara.setAlignment(t.alignment)
+                        renderPara.setSpacingBefore(t.spacingBefore)
+                        renderPara.setSpacingAfter(t.spacingAfter)
+                        if (!prefix.isEmpty()) {
+                            let prefixFont = if (!t.getChunks().isEmpty()) {
+                                t.getChunks()[0].font
+                            } else {
+                                t.font
+                            }
+                            _ = renderPara.add(Chunk(prefix, prefixFont))
+                        }
+                        for (chunk in t.getChunks()) { _ = renderPara.add(chunk) }
 
-                        // 书签指向当前页顶部
-                        let dest = PdfDestination(getCurrentPageReference())
+                        let orig = renderPara.indentationLeft
+                        renderPara.setIndentationLeft(orig + myIndent)
+                        let destY = _currentY
+                        _ = add(renderPara)
+                        renderPara.setIndentationLeft(orig)
+
+                        // 书签用含前缀的完整标题文本（与 Java 一致）
+                        var rawText = ""
+                        for (chunk in t.getChunks()) { rawText += chunk.content }
+                        let titleText = if (prefix.isEmpty()) { rawText } else { prefix + rawText }
+
+                        let dest = PdfDestination(getCurrentPageReference(), 0.0, destY, 0.0)
                         let outline = PdfOutline(titleText, dest)
                         match (parentOutline) {
                             case Some(p) => p.addChild(outline)
                             case None => getOutlineTree().addOutline(outline)
                         }
                         sectionOutline = Some(outline)
-
-                        // 标题段落使用本节缩进
-                        let orig = t.indentationLeft
-                        t.setIndentationLeft(orig + myIndent)
-                        _ = add(t)
-                        t.setIndentationLeft(orig)
                     case None => ()
                 }
 
@@ -609,9 +693,14 @@ public class PdfWriter <: DocListener {
                     }
                 }
 
-                // 子节递归，传入本节累积缩进和当前书签节点
+                // 子节递归，传入本节序号路径 + 子节位置
+                var subCounter: Int32 = 0
                 for (sub in section.subsections) {
-                    _ = processSectionWithIndent(sub, myIndent, sectionOutline)
+                    subCounter += 1
+                    let subNums = ArrayList<Int32>()
+                    for (n in nums) { subNums.add(n) }
+                    subNums.add(subCounter)
+                    _ = processSectionWithIndent(sub, myIndent, sectionOutline, subNums)
                 }
                 true
             case _ => false
@@ -864,6 +953,14 @@ public class PdfWriter <: DocListener {
             case Some(url) => _ = seg.setAnchorURL(url)
             case None => ()
         }
+        match (template.getAttribute(Chunk.LOCALGOTO)) {
+            case Some(name) => _ = seg.setLocalGoto(name)
+            case None => ()
+        }
+        match (template.getAttribute(Chunk.LOCALDESTINATION)) {
+            case Some(name) => _ = seg.setLocalDestination(name)
+            case None => ()
+        }
         seg
     }
 
@@ -873,11 +970,24 @@ public class PdfWriter <: DocListener {
         _prevJustifyTc = 0.0
         _prevJustifyTw = 0.0
 
-        // 段前间距
-        _currentY -= para.spacingBefore
+        // 若段落 leading 来自默认字体，从实际 chunk 字体计算有效 leading
+        // 与 OpenPDF 一致：leading 取段落声明值与内容最大自然 leading 的较大值
+        var effectiveLeading = para.leading
+        for (chunk in para.getChunks()) {
+            let chunkLeading = chunk.font.size * 1.5
+            if (chunkLeading > effectiveLeading) {
+                effectiveLeading = chunkLeading
+            }
+        }
+
+        // 段前间距（页面顶部第一个段落不应用，与 OpenPDF 一致）
+        if (!_atPageTop) {
+            _currentY -= para.spacingBefore
+        }
+        _atPageTop = false
 
         // 若连一行都放不下则换页
-        if (_currentY - para.leading < _marginBottom) {
+        if (_currentY - effectiveLeading < _marginBottom) {
             newPage()
         }
 
@@ -1015,7 +1125,7 @@ public class PdfWriter <: DocListener {
 
         // keepTogether: 若整段放不下当前剩余空间，先换页再渲染（段高不超过整页才有意义）
         if (para.keepTogether) {
-            let totalHeight = Float32(allLines.size) * para.leading + para.spacingAfter
+            let totalHeight = Float32(allLines.size) * effectiveLeading + para.spacingAfter
             let pageAvail = _pageSize.height - _marginTop - _marginBottom
             if (totalHeight <= pageAvail && _currentY - totalHeight < _marginBottom) {
                 _currentY += para.spacingBefore
@@ -1029,7 +1139,7 @@ public class PdfWriter <: DocListener {
         for (i in 0..allLines.size) {
             let line = allLines[i]
 
-            _currentY -= para.leading
+            _currentY -= effectiveLeading
             if (_currentY < _marginBottom) {
                 newPage()
             }
@@ -1086,17 +1196,44 @@ public class PdfWriter <: DocListener {
                 }
             }
 
-            // 逐 chunk 渲染，顺带检测 Anchor URL 并生成 Link 注释
+            // 逐 chunk 渲染，顺带检测 Anchor URL / LocalGoto / LocalDestination
             var cx = startX
             for (seg in line) {
                 drawChunk(seg, cx, _currentY, para.alignment)
                 let segW = seg.getWidthPoint()
+                // annotation rect: bottom = baseline, top = baseline + font.size（与 OpenPDF 一致）
+                let lly = _currentY
+                let ury = _currentY + seg.font.size
+                // URL 外链
                 match (seg.getAttribute(Chunk.ANCHOR)) {
                     case Some(url) =>
-                        let lly = _currentY - seg.font.size * 0.2
-                        let ury = _currentY + seg.font.size * 0.8
                         let linkRect = Rectangle(cx, lly, cx + segW, ury)
                         addAnnotation(PdfAnnotationFactory.createURLLink(linkRect, url))
+                    case None => ()
+                }
+                // 文档内跳转链接
+                match (seg.getAttribute(Chunk.LOCALGOTO)) {
+                    case Some(destName) =>
+                        let linkRect = Rectangle(cx, lly, cx + segW, ury)
+                        let action = PdfActionGoTo(destName)
+                        let link = PdfAnnotationFactory.createLink(linkRect, action)
+                        // 设置注释颜色（/C），与 OpenPDF 一致
+                        match (seg.font.color) {
+                            case Some(c) =>
+                                let colorArr = PdfArray()
+                                colorArr.add(PdfNumber(Float32(c.red) / 255.0))
+                                colorArr.add(PdfNumber(Float32(c.green) / 255.0))
+                                colorArr.add(PdfNumber(Float32(c.blue) / 255.0))
+                                link.getDictionary().put(PdfName("C"), colorArr)
+                            case None => ()
+                        }
+                        addAnnotation(link)
+                    case None => ()
+                }
+                // 命名目标锚点（被跳转的位置）
+                match (seg.getAttribute(Chunk.LOCALDESTINATION)) {
+                    case Some(destName) =>
+                        addNamedDestination(destName, _currentY)
                     case None => ()
                 }
                 cx += segW
@@ -1126,7 +1263,7 @@ public class PdfWriter <: DocListener {
         }
 
         // 记录本段落 leading，供后续空段落复用（与 OpenPDF 行为一致）
-        _lastLeading = para.leading
+        _lastLeading = effectiveLeading
 
         // 通知段落结束
         fireOnParagraphEnd(_currentY)

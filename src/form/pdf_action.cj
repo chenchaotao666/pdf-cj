@@ -105,6 +105,16 @@ public class PdfActionGoTo <: PdfAction {
         dest.add(PdfName("Fit"))
         dictionary.put(PdfName("D"), dest)
     }
+
+    /**
+     * 构造函数（使用命名目标字符串，用于文档内部跳转）
+     * @param name 目标名称（与 setLocalDestination 对应）
+     */
+    public init(name: String) {
+        super(PdfActionType.GoTo)
+        dictionary.put(PdfName("S"), PdfName("GoTo"))
+        dictionary.put(PdfName("D"), PdfString(name))
+    }
 }
 
 /**
