@@ -1,16 +1,23 @@
 package pdf_cj_examples
 
-import pdf_cj.api.{Document, Paragraph, Phrase, Chunk}
+import pdf_cj.api.{Document, Paragraph}
 import pdf_cj.core.{PdfWriter, PdfContentByte}
 import pdf_cj.form.PdfFormFieldFactory
 import pdf_cj.text.{BaseFont, Font, FontStyle, Color, Alignment}
 import pdf_cj.util.{PageSize, Rectangle}
 import std.fs.{File, OpenMode, Path}
 
-let _s13_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-let _s13_OUT  = "output/"
+let _s13_OUT = "output/"
 
-
+// Draw a label at absolute position using PdfContentByte
+func s13Label(cb: PdfContentByte, helvBf: BaseFont, helvName: String, text: String, x: Float32, y: Float32): Unit {
+    cb.beginText()
+    cb.setFontAndSize(helvBf, helvName, 11.0)
+    cb.setColorFill(Color(0, 0, 0))
+    cb.setTextMatrix(x, y)
+    cb.showText(text, false, Some(helvBf))
+    cb.endText()
+}
 
 func s13_formField(): Unit {
     println("S13: Form Field Demo")
@@ -22,123 +29,168 @@ func s13_formField(): Unit {
         let writer = PdfWriter.getInstance(doc, file)
         doc.open()
 
-        var title = Paragraph("S13: Form Field Demo", Font(cjkBf, 18.0, FontStyle.Bold))
-        title.setAlignment(Alignment.Center)
-        title.setSpacingAfter(20.0)
-        doc.add(title)
-        doc.add(Paragraph("This PDF contains interactive form fields.", Font(helvBf, 11.0)))
+        let cb = writer.getDirectContent()
+        let helvName = writer.addFont(helvBf)
+        let cjkName = writer.addFont(cjkBf)
 
+        // Title
+        cb.beginText()
+        cb.setFontAndSize(cjkBf, cjkName, 18.0)
+        cb.setColorFill(Color(0, 0, 0))
+        cb.showTextAligned(PdfContentByte.ALIGN_CENTER, "S13: Form Field Demo", 297.0, 780.0, 0.0)
+        cb.endText()
+
+        cb.beginText()
+        cb.setFontAndSize(helvBf, helvName, 11.0)
+        cb.setColorFill(Color(0, 0, 0))
+        cb.setTextMatrix(72.0, 755.0)
+        cb.showText("Each type: (a) default settings  (b) custom settings.", false, Some(helvBf))
+        cb.endText()
+
+        let labelX: Float32 = 72.0
         let fieldX: Float32 = 200.0
         let fieldW: Float32 = 280.0
         var yPos: Float32 = 720.0
 
-        // 1. Text field (single line)
+        // ---- 1. Text Field ----
+        s13Label(cb, helvBf, helvName, "1a. Text Field (default):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph(" ", Font(helvBf, 4.0)))
-            doc.add(Paragraph("1. Text Field (single line):", Font(helvBf, 11.0)))
-            let tf = PdfFormFieldFactory.createTextField("textField1", fieldX, yPos - 20.0, fieldW, 20.0)
-            tf.setValue("Default text value")
-            tf.generateAppearance()
-            writer.addFormField(tf)
-            yPos -= 40.0
-        } catch (e: Exception) {
-            doc.add(Paragraph("1. TextField error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let tf1a = PdfFormFieldFactory.createTextField("tf_default", fieldX, yPos - 18.0, fieldW, 18.0)
+            tf1a.setText("Default text")
+            writer.addFormField(tf1a)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 32.0
 
-        // 2. Multiline text field
+        s13Label(cb, helvBf, helvName, "1b. Text Field (custom: size=11, gray border, light-blue bg):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph("2. Text Field (multiline):", Font(helvBf, 11.0)))
-            let mlTf = PdfFormFieldFactory.createTextField("multilineField", fieldX, yPos - 60.0, fieldW, 60.0)
-            mlTf.setValue("Line 1\nLine 2\nLine 3")
-            mlTf.generateAppearance()
-            writer.addFormField(mlTf)
-            yPos -= 80.0
-        } catch (e: Exception) {
-            doc.add(Paragraph("2. Multiline TextField error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let tf1b = PdfFormFieldFactory.createTextField("tf_custom", fieldX, yPos - 18.0, fieldW, 18.0)
+            tf1b.setText("Custom text")
+            tf1b.setFontSize(11.0)
+            tf1b.setBorderColor(128, 128, 128)
+            tf1b.setBackgroundColor(240, 248, 255)
+            writer.addFormField(tf1b)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 38.0
 
-        // 3. Checkbox (checked)
+        // ---- 2. Multiline Text Field ----
+        s13Label(cb, helvBf, helvName, "2a. Multiline (default):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph("3. Checkbox (checked):", Font(helvBf, 11.0)))
-            let cb = PdfFormFieldFactory.createCheckBox("checkbox1", fieldX, yPos - 20.0, 14.0)
-            cb.generateAppearance()
-            writer.addFormField(cb)
-            yPos -= 35.0
-        } catch (e: Exception) {
-            doc.add(Paragraph("3. Checkbox error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let tf2a = PdfFormFieldFactory.createTextField("ml_default", fieldX, yPos - 42.0, fieldW, 42.0)
+            tf2a.setText("Line 1\nLine 2\nLine 3")
+            tf2a.setMultiline(true)
+            writer.addFormField(tf2a)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 55.0
 
-        // 4. Checkbox (unchecked)
+        s13Label(cb, helvBf, helvName, "2b. Multiline (custom: size=10, gray border, light-yellow bg):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph("4. Checkbox (unchecked):", Font(helvBf, 11.0)))
-            let cb2 = PdfFormFieldFactory.createCheckBox("checkbox2", fieldX, yPos - 20.0, 14.0)
-            cb2.generateAppearance()
-            writer.addFormField(cb2)
-            yPos -= 35.0
-        } catch (e: Exception) {
-            doc.add(Paragraph("4. Checkbox unchecked error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let tf2b = PdfFormFieldFactory.createTextField("ml_custom", fieldX, yPos - 42.0, fieldW, 42.0)
+            tf2b.setText("Line 1\nLine 2\nLine 3")
+            tf2b.setFontSize(10.0)
+            tf2b.setMultiline(true)
+            tf2b.setBorderColor(128, 128, 128)
+            tf2b.setBackgroundColor(255, 255, 240)
+            writer.addFormField(tf2b)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 58.0
 
-        // 5. Radio button group
+        // ---- 3. Checkbox ----
+        s13Label(cb, helvBf, helvName, "3a. Checkbox (default, checked):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph("5. Radio Button Group:", Font(helvBf, 11.0)))
-            let radioGroup = PdfFormFieldFactory.createRadioButtonGroup("radioGroup1")
-            radioGroup.addOption("Option A", Rectangle(fieldX, yPos - 18.0, fieldX + 14.0, yPos))
-            radioGroup.addOption("Option B", Rectangle(fieldX, yPos - 43.0, fieldX + 14.0, yPos - 25.0))
-            radioGroup.addOption("Option C", Rectangle(fieldX, yPos - 68.0, fieldX + 14.0, yPos - 50.0))
-            radioGroup.selectOption("Option A")
-            radioGroup.generateAppearance()
-            writer.addFormField(radioGroup)
-            yPos -= 90.0
-        } catch (e: Exception) {
-            doc.add(Paragraph("5. Radio button error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let cb3a = PdfFormFieldFactory.createCheckBox("cb_default", fieldX, yPos - 16.0, 16.0)
+            cb3a.setChecked(true)
+            writer.addFormField(cb3a)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 28.0
 
-        // 6. Combo box (dropdown)
+        s13Label(cb, helvBf, helvName, "3b. Checkbox (custom: black border, white bg, unchecked):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph("6. Combo Box (dropdown):", Font(helvBf, 11.0)))
-            let combo = PdfFormFieldFactory.createComboBox("comboField1", fieldX, yPos - 20.0, fieldW, 20.0)
-            combo.addOptions(["-- Select --", "Apple", "Banana", "Cherry", "Date"])
-            combo.setValue("-- Select --")
-            combo.generateAppearance()
-            writer.addFormField(combo)
-            yPos -= 35.0
-        } catch (e: Exception) {
-            doc.add(Paragraph("6. Combo box error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let cb3b = PdfFormFieldFactory.createCheckBox("cb_custom", fieldX, yPos - 16.0, 16.0)
+            cb3b.setChecked(false)
+            cb3b.setBorderColor(0, 0, 0)
+            cb3b.setBackgroundColor(255, 255, 255)
+            writer.addFormField(cb3b)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 35.0
 
-        // 7. List box
+        // ---- 4. Radio Button Group ----
+        s13Label(cb, helvBf, helvName, "4a. Radio Group (default):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph("7. List Box:", Font(helvBf, 11.0)))
-            let listbox = PdfFormFieldFactory.createListBox("listField1", fieldX, yPos - 70.0, fieldW, 70.0)
-            listbox.addOptions(["Red", "Green", "Blue", "Yellow", "Purple"])
-            writer.addFormField(listbox)
-            yPos -= 90.0
-        } catch (e: Exception) {
-            doc.add(Paragraph("7. List box error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let rg4a = PdfFormFieldFactory.createRadioButtonGroup("radio_default")
+            rg4a.addOption("A", Rectangle(fieldX, yPos - 16.0, fieldX + 16.0, yPos))
+            rg4a.addOption("B", Rectangle(fieldX, yPos - 34.0, fieldX + 16.0, yPos - 18.0))
+            rg4a.addOption("C", Rectangle(fieldX, yPos - 52.0, fieldX + 16.0, yPos - 36.0))
+            rg4a.selectOption("A")
+            writer.addFormField(rg4a)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 65.0
 
-        // 8. Push button
+        s13Label(cb, helvBf, helvName, "4b. Radio Group (custom: black border, white bg):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph("8. Push Button:", Font(helvBf, 11.0)))
-            let btn = PdfFormFieldFactory.createPushButton("pushButton1", fieldX, yPos - 24.0, 120.0, 24.0, "Submit 提交")
-            btn.generateAppearance()
-            writer.addFormField(btn)
-            yPos -= 40.0
-        } catch (e: Exception) {
-            doc.add(Paragraph("8. Push button error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let rg4b = PdfFormFieldFactory.createRadioButtonGroup("radio_custom")
+            rg4b.addOption("A", Rectangle(fieldX, yPos - 16.0, fieldX + 16.0, yPos), 0, 0, 0, 255, 255, 255)
+            rg4b.addOption("B", Rectangle(fieldX, yPos - 34.0, fieldX + 16.0, yPos - 18.0), 0, 0, 0, 255, 255, 255)
+            rg4b.addOption("C", Rectangle(fieldX, yPos - 52.0, fieldX + 16.0, yPos - 36.0), 0, 0, 0, 255, 255, 255)
+            rg4b.selectOption("A")
+            writer.addFormField(rg4b)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 68.0
 
-        // 9. CJK text field
+        // ---- 5. Combo Box ----
+        s13Label(cb, helvBf, helvName, "5a. Combo Box (default):", labelX, yPos + 5.0)
         try {
-            doc.add(Paragraph("9. CJK Text Field (中文输入):", Font(cjkBf, 11.0)))
-            let cjkTf = PdfFormFieldFactory.createTextField("cjkField", fieldX, yPos - 20.0, fieldW, 20.0)
-            cjkTf.setValue("请输入中文内容")
-            cjkTf.generateAppearance()
-            writer.addFormField(cjkTf)
-        } catch (e: Exception) {
-            doc.add(Paragraph("9. CJK TextField error: ${e.message}", Font(helvBf, 10.0)))
-        }
+            let cb5a = PdfFormFieldFactory.createComboBox("combo_default", fieldX, yPos - 18.0, fieldW, 18.0)
+            cb5a.addOptions(["Apple", "Banana", "Cherry"])
+            cb5a.setValue("Apple")
+            writer.addFormField(cb5a)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 30.0
+
+        s13Label(cb, helvBf, helvName, "5b. Combo Box (custom: size=10, gray border):", labelX, yPos + 5.0)
+        try {
+            let cb5b = PdfFormFieldFactory.createComboBox("combo_custom", fieldX, yPos - 18.0, fieldW, 18.0)
+            cb5b.addOptions(["Apple", "Banana", "Cherry"])
+            cb5b.setValue("Apple")
+            cb5b.setBorderColor(128, 128, 128)
+            writer.addFormField(cb5b)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 35.0
+
+        // ---- 6. List Box ----
+        s13Label(cb, helvBf, helvName, "6a. List Box (default):", labelX, yPos + 5.0)
+        try {
+            let lb6a = PdfFormFieldFactory.createListBox("list_default", fieldX, yPos - 48.0, fieldW, 48.0)
+            lb6a.addOptions(["Red", "Green", "Blue"])
+            lb6a.setValue("Red")
+            writer.addFormField(lb6a)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 62.0
+
+        s13Label(cb, helvBf, helvName, "6b. List Box (custom: multiselect, gray border):", labelX, yPos + 5.0)
+        try {
+            let lb6b = PdfFormFieldFactory.createListBox("list_custom", fieldX, yPos - 48.0, fieldW, 48.0)
+            lb6b.addOptions(["Red", "Green", "Blue"])
+            lb6b.setValue("Green")
+            lb6b.setMultiSelect(true)
+            lb6b.setBorderColor(128, 128, 128)
+            writer.addFormField(lb6b)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 65.0
+
+        // ---- 7. Push Button ----
+        s13Label(cb, helvBf, helvName, "7a. Push Button (default: outline):", labelX, yPos + 5.0)
+        try {
+            let btn7a = PdfFormFieldFactory.createPushButton("btn_default", fieldX, yPos - 20.0, 120.0, 20.0, "Click Me!")
+            btn7a.setFilled(false)
+            writer.addFormField(btn7a)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
+        yPos -= 32.0
+
+        s13Label(cb, helvBf, helvName, "7b. Push Button (custom: blue bg):", labelX, yPos + 5.0)
+        try {
+            let btn7b = PdfFormFieldFactory.createPushButton("btn_custom", fieldX, yPos - 20.0, 120.0, 20.0, "Click Me!")
+            writer.addFormField(btn7b)
+        } catch (e: Exception) { s13Label(cb, helvBf, helvName, "error: ${e.message}", labelX, yPos - 10.0) }
 
         doc.close()
         println("  S13 done: ${_s13_OUT}cj_s13_formfield.pdf")

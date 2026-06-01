@@ -233,7 +233,18 @@ public class PdfWriter <: DocListener {
             }
             let acroForm = PdfDictionary()
             acroForm.put(PdfName("Fields"), fieldsArray)
-            acroForm.put(PdfName("NeedAppearances"), PdfBoolean(true))
+
+            // /DR: 默认资源字典，供 /DA 中的字体引用
+            let helvFont = PdfDictionary()
+            helvFont.put(PdfName("Type"), PdfName("Font"))
+            helvFont.put(PdfName("Subtype"), PdfName("Type1"))
+            helvFont.put(PdfName("BaseFont"), PdfName("Helvetica"))
+            let drFonts = PdfDictionary()
+            drFonts.put(PdfName("Helv"), helvFont)
+            let dr = PdfDictionary()
+            dr.put(PdfName("Font"), drFonts)
+            acroForm.put(PdfName("DR"), dr)
+
             _catalog.setAcroForm(acroForm)
         }
 
@@ -373,6 +384,7 @@ public class PdfWriter <: DocListener {
      * 添加表单字段到当前页面（同时写入 AcroForm 和页面 Annots）
      */
     public func addFormField(field: PdfFormField): Unit {
+        field.generateAppearance()
         _currentPageFormFields.add(field)
     }
 
@@ -734,11 +746,35 @@ public class PdfWriter <: DocListener {
         // 表单字段（合并的字段+Widget 对象）
         for (i in 0.._currentPageFormFields.size) {
             let field = _currentPageFormFields[i]
-            let mergedDict = buildMergedFieldDict(field, _currentPageObjNum)
-            let fieldRef = _body.add(mergedDict)
-            annotsArray.add(fieldRef)
-            _allFieldRefs.add(fieldRef)
-            hasAnnots = true
+            let widgets = field.getWidgets()
+            if (widgets.size <= 1) {
+                // 单 widget 字段：合并为一个 annotation 对象
+                let mergedDict = buildMergedFieldDict(field, _currentPageObjNum)
+                let fieldRef = _body.add(mergedDict)
+                annotsArray.add(fieldRef)
+                _allFieldRefs.add(fieldRef)
+                hasAnnots = true
+            } else {
+                // 多 widget 字段（如 radio group）：parent + kids 结构
+                let parentObjNum = _body.reserveObjectNumber()
+                let parentRef = PdfIndirectReference(parentObjNum)
+                let kidsArray = PdfArray()
+                for (j in 0..widgets.size) {
+                    let wDict = widgets[j].getDictionary()
+                    wDict.put(PdfName("Type"), PdfName("Annot"))
+                    wDict.put(PdfName("Subtype"), PdfName("Widget"))
+                    wDict.put(PdfName("P"), PdfIndirectReference(_currentPageObjNum))
+                    wDict.put(PdfName("Parent"), parentRef)
+                    let kidRef = _body.add(wDict)
+                    kidsArray.add(kidRef)
+                    annotsArray.add(kidRef)
+                    hasAnnots = true
+                }
+                let parentDict = field.getDictionary()
+                parentDict.put(PdfName("Kids"), kidsArray)
+                _body.add(parentDict, parentObjNum)
+                _allFieldRefs.add(parentRef)
+            }
         }
 
         if (hasAnnots) {
@@ -763,27 +799,28 @@ public class PdfWriter <: DocListener {
     }
 
     /**
-     * 将表单字段字典与其 Widget 注释属性合并为单个 PDF 对象
+     * 将表单字段字典与其 Widget 注释属性合并为单个 PDF 对象（单 widget 字段专用）
      */
     private func buildMergedFieldDict(field: PdfFormField, pageObjNum: Int32): PdfDictionary {
         let dict = field.getDictionary()
-        // 设置 Annot 类型标记
         dict.put(PdfName("Type"), PdfName("Annot"))
         dict.put(PdfName("Subtype"), PdfName("Widget"))
-        // 设置页面引用
         dict.put(PdfName("P"), PdfIndirectReference(pageObjNum))
-        // 从第一个 widget 复制 Rect（如果字段字典本身没有 Rect）
-        match (dict.get(PdfName("Rect"))) {
-            case None =>
-                let widgets = field.getWidgets()
-                if (widgets.size > 0) {
-                    let widgetDict = widgets[0].getDictionary()
-                    match (widgetDict.get(PdfName("Rect"))) {
-                        case Some(rect) => dict.put(PdfName("Rect"), rect)
-                        case None => ()
-                    }
+
+        let widgets = field.getWidgets()
+        if (widgets.size > 0) {
+            let widgetDict = widgets[0].getDictionary()
+            // 从 widget 复制 Rect、AP、AS、MK 到字段合并字典
+            for (key in ["Rect", "AP", "AS", "MK"]) {
+                match (dict.get(PdfName(key))) {
+                    case None =>
+                        match (widgetDict.get(PdfName(key))) {
+                            case Some(v) => dict.put(PdfName(key), v)
+                            case None => ()
+                        }
+                    case Some(_) => ()
                 }
-            case Some(_) => ()
+            }
         }
         dict
     }

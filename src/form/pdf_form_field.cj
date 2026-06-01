@@ -152,7 +152,8 @@ class FormAppearanceBuilder {
     static func buildTextStreamFull(w: Float32, h: Float32, value: String, fontSize: Float32,
                                      hasBg: Bool, bgR: Float32, bgG: Float32, bgB: Float32,
                                      hasBorder: Bool, bcR: Float32, bcG: Float32, bcB: Float32): PdfStream {
-        let fs: Float32 = if (fontSize > 0.0) { fontSize } else if (12.0 < h * 0.7) { 12.0 } else { h * 0.7 }
+        let autoFs: Float32 = h * 0.55
+        let fs: Float32 = if (fontSize > 0.0) { fontSize } else if (autoFs < 10.0) { autoFs } else { 10.0 }
         let baseline: Float32 = (h - fs) / 2.0 + 1.0
         let escaped = escapePdfStr(value)
         var inner = ""
@@ -221,13 +222,16 @@ class FormAppearanceBuilder {
     /**
      * 构建按钮外观流
      */
-    static func buildPushButtonStream(w: Float32, h: Float32, caption: String): PdfStream {
-        let fontSize: Float32 = if (12.0 < h * 0.65) { 12.0 } else { h * 0.65 }
-        let captionLen = Float32(caption.size)
-        let tx: Float32 = (w - captionLen * fontSize * 0.5) / 2.0
+    static func buildPushButtonStream(w: Float32, h: Float32, caption: String, filled: Bool): PdfStream {
+        let fontSize: Float32 = 10.0
+        let tx: Float32 = 10.0
         let ty: Float32 = (h - fontSize) / 2.0 + 1.0
         let escaped = escapePdfStr(caption)
-        let content = "q\n0.75 0.75 0.75 rg\n0 0 ${fmtF(w)} ${fmtF(h)} re f\n0.5 0.5 0.5 RG\n0.5 w\n0 0 ${fmtF(w)} ${fmtF(h)} re S\n0 0 0 rg\nBT\n/Helv ${fmtF(fontSize)} Tf\n${fmtF(tx)} ${fmtF(ty)} Td\n(${escaped}) Tj\nET\nQ\n"
+        let content = if (filled) {
+            "q\n0.784 0.784 0.941 rg\n0 0 ${fmtF(w)} ${fmtF(h)} re f\n0 0 0 rg\nBT\n/Helv ${fmtF(fontSize)} Tf\n${fmtF(tx)} ${fmtF(ty)} Td\n(${escaped}) Tj\nET\nQ\n"
+        } else {
+            "q\n0.5 0.5 0.5 RG\n0.5 w\n0 0 ${fmtF(w)} ${fmtF(h)} re S\n0 0 0 rg\nBT\n/Helv ${fmtF(fontSize)} Tf\n${fmtF(tx)} ${fmtF(ty)} Td\n(${escaped}) Tj\nET\nQ\n"
+        }
         let stream = PdfStream(content)
         makeXObject(stream, w, h, helveticaResources())
         stream
@@ -278,6 +282,18 @@ public open class PdfFormField {
     public func setValue(value: String): Unit {
         dictionary.put(PdfName("V"), PdfString(value))
     }
+
+    /**
+     * 设置文本内容（setValue 的别名，与 Java TextField.setText 对齐）
+     */
+    public func setText(text: String): Unit {
+        setValue(text)
+    }
+
+    /**
+     * 生成外观字典 /AP（子类覆盖；基类为空操作）
+     */
+    public open func generateAppearance(): Unit {}
 
     /**
      * 获取字段值
@@ -399,6 +415,8 @@ public class PdfTextFormField <: PdfFormField {
         super(FieldType.Text, fieldName)
         this.rect = rect
         dictionary.put(PdfName("FT"), PdfName("Tx"))
+        // 默认外观字符串：0pt = auto-size，与 Java TextField 不调 setFontSize 时行为一致
+        dictionary.put(PdfName("DA"), PdfString("/Helv 0 Tf 0 g"))
 
         // 创建控件注释
         let widget = PdfAnnotation(AnnotationType.Widget, rect)
@@ -406,17 +424,27 @@ public class PdfTextFormField <: PdfFormField {
         addWidget(widget)
     }
 
-    /** 设置边框颜色（0.0–1.0 分量），同时写入 /MK 和 /BS */
+    /** 设置边框颜色（0.0–1.0 分量） */
     public func setBorderColor(r: Float32, g: Float32, b: Float32): Unit {
         mkBcR = r; mkBcG = g; mkBcB = b
         writeMKDict()
         writeBSDict()
     }
 
-    /** 设置背景填充颜色（0.0–1.0 分量），同时写入 /MK */
+    /** 设置边框颜色（0–255 整数，与 Java Color(r,g,b) 对齐） */
+    public func setBorderColor(r: Int32, g: Int32, b: Int32): Unit {
+        setBorderColor(Float32(r) / 255.0, Float32(g) / 255.0, Float32(b) / 255.0)
+    }
+
+    /** 设置背景填充颜色（0.0–1.0 分量） */
     public func setBackgroundColor(r: Float32, g: Float32, b: Float32): Unit {
         mkBgR = r; mkBgG = g; mkBgB = b
         writeMKDict()
+    }
+
+    /** 设置背景填充颜色（0–255 整数，与 Java Color(r,g,b) 对齐） */
+    public func setBackgroundColor(r: Int32, g: Int32, b: Int32): Unit {
+        setBackgroundColor(Float32(r) / 255.0, Float32(g) / 255.0, Float32(b) / 255.0)
     }
 
     private func writeMKDict(): Unit {
@@ -493,6 +521,13 @@ public class PdfTextFormField <: PdfFormField {
     }
 
     /**
+     * 设置字体大小（更新 /DA 字符串）
+     */
+    public func setFontSize(size: Float32): Unit {
+        dictionary.put(PdfName("DA"), PdfString("/Helv ${size} Tf 0 g"))
+    }
+
+    /**
      * 设置默认外观
      */
     public func setDefaultAppearance(da: String): Unit {
@@ -504,6 +539,46 @@ public class PdfTextFormField <: PdfFormField {
  * 复选框字段
  */
 public class PdfCheckBoxFormField <: PdfFormField {
+    private var mkBcR: Float32 = -1.0
+    private var mkBcG: Float32 = -1.0
+    private var mkBcB: Float32 = -1.0
+    private var mkBgR: Float32 = -1.0
+    private var mkBgG: Float32 = -1.0
+    private var mkBgB: Float32 = -1.0
+
+    public func setBorderColor(r: Float32, g: Float32, b: Float32): Unit {
+        mkBcR = r; mkBcG = g; mkBcB = b
+        writeMKDict()
+    }
+
+    public func setBorderColor(r: Int32, g: Int32, b: Int32): Unit {
+        setBorderColor(Float32(r) / 255.0, Float32(g) / 255.0, Float32(b) / 255.0)
+    }
+
+    public func setBackgroundColor(r: Float32, g: Float32, b: Float32): Unit {
+        mkBgR = r; mkBgG = g; mkBgB = b
+        writeMKDict()
+    }
+
+    public func setBackgroundColor(r: Int32, g: Int32, b: Int32): Unit {
+        setBackgroundColor(Float32(r) / 255.0, Float32(g) / 255.0, Float32(b) / 255.0)
+    }
+
+    private func writeMKDict(): Unit {
+        let mkDict = PdfDictionary()
+        if (mkBcR >= 0.0) {
+            let bc = PdfArray()
+            bc.add(PdfNumber(mkBcR)); bc.add(PdfNumber(mkBcG)); bc.add(PdfNumber(mkBcB))
+            mkDict.put(PdfName("BC"), bc)
+        }
+        if (mkBgR >= 0.0) {
+            let bg = PdfArray()
+            bg.add(PdfNumber(mkBgR)); bg.add(PdfNumber(mkBgG)); bg.add(PdfNumber(mkBgB))
+            mkDict.put(PdfName("BG"), bg)
+        }
+        dictionary.put(PdfName("MK"), mkDict)
+    }
+
     /**
      * 构造函数
      */
@@ -582,12 +657,36 @@ public class PdfRadioButtonFormField <: PdfFormField {
     }
 
     /**
-     * 添加选项
+     * 添加选项（默认，无样式）
      */
     public func addOption(optionName: String, rect: Rectangle): Unit {
         let widget = PdfAnnotation(AnnotationType.Widget, rect)
         widget.getDictionary().put(PdfName("Subtype"), PdfName("Widget"))
         widget.getDictionary().put(PdfName("AS"), PdfName(optionName))
+        addWidget(widget)
+    }
+
+    /**
+     * 添加选项（带边框色/背景色，0–255 整数）
+     */
+    public func addOption(optionName: String, rect: Rectangle,
+                          borderR: Int32, borderG: Int32, borderB: Int32,
+                          bgR: Int32, bgG: Int32, bgB: Int32): Unit {
+        let widget = PdfAnnotation(AnnotationType.Widget, rect)
+        widget.getDictionary().put(PdfName("Subtype"), PdfName("Widget"))
+        widget.getDictionary().put(PdfName("AS"), PdfName(optionName))
+        let mkDict = PdfDictionary()
+        let bc = PdfArray()
+        bc.add(PdfNumber(Float32(borderR) / 255.0))
+        bc.add(PdfNumber(Float32(borderG) / 255.0))
+        bc.add(PdfNumber(Float32(borderB) / 255.0))
+        mkDict.put(PdfName("BC"), bc)
+        let bg = PdfArray()
+        bg.add(PdfNumber(Float32(bgR) / 255.0))
+        bg.add(PdfNumber(Float32(bgG) / 255.0))
+        bg.add(PdfNumber(Float32(bgB) / 255.0))
+        mkDict.put(PdfName("BG"), bg)
+        widget.getDictionary().put(PdfName("MK"), mkDict)
         addWidget(widget)
     }
 
@@ -680,6 +779,22 @@ public class PdfRadioButtonFormField <: PdfFormField {
  */
 public class PdfComboBoxFormField <: PdfFormField {
     private var options: ArrayList<String> = ArrayList<String>()
+    private var mkBcR: Float32 = -1.0
+    private var mkBcG: Float32 = -1.0
+    private var mkBcB: Float32 = -1.0
+
+    public func setBorderColor(r: Float32, g: Float32, b: Float32): Unit {
+        mkBcR = r; mkBcG = g; mkBcB = b
+        let mkDict = PdfDictionary()
+        let bc = PdfArray()
+        bc.add(PdfNumber(r)); bc.add(PdfNumber(g)); bc.add(PdfNumber(b))
+        mkDict.put(PdfName("BC"), bc)
+        dictionary.put(PdfName("MK"), mkDict)
+    }
+
+    public func setBorderColor(r: Int32, g: Int32, b: Int32): Unit {
+        setBorderColor(Float32(r) / 255.0, Float32(g) / 255.0, Float32(b) / 255.0)
+    }
 
     /**
      * 构造函数
@@ -688,6 +803,7 @@ public class PdfComboBoxFormField <: PdfFormField {
         super(FieldType.Choice, fieldName)
         this.rect = rect
         dictionary.put(PdfName("FT"), PdfName("Ch"))
+        dictionary.put(PdfName("DA"), PdfString("/Helv 10 Tf 0 g"))
 
         // Ff bit 18: Combo - 设置为下拉框
         setFlags(131072)
@@ -748,6 +864,22 @@ public class PdfComboBoxFormField <: PdfFormField {
  */
 public class PdfListBoxFormField <: PdfFormField {
     private var options: ArrayList<String> = ArrayList<String>()
+    private var mkBcR: Float32 = -1.0
+    private var mkBcG: Float32 = -1.0
+    private var mkBcB: Float32 = -1.0
+
+    public func setBorderColor(r: Float32, g: Float32, b: Float32): Unit {
+        mkBcR = r; mkBcG = g; mkBcB = b
+        let mkDict = PdfDictionary()
+        let bc = PdfArray()
+        bc.add(PdfNumber(r)); bc.add(PdfNumber(g)); bc.add(PdfNumber(b))
+        mkDict.put(PdfName("BC"), bc)
+        dictionary.put(PdfName("MK"), mkDict)
+    }
+
+    public func setBorderColor(r: Int32, g: Int32, b: Int32): Unit {
+        setBorderColor(Float32(r) / 255.0, Float32(g) / 255.0, Float32(b) / 255.0)
+    }
 
     /**
      * 构造函数
@@ -755,6 +887,7 @@ public class PdfListBoxFormField <: PdfFormField {
     public init(fieldName: String, rect: Rectangle) {
         super(FieldType.Choice, fieldName)
         dictionary.put(PdfName("FT"), PdfName("Ch"))
+        dictionary.put(PdfName("DA"), PdfString("/Helv 10 Tf 0 g"))
 
         // 创建控件注释
         let widget = PdfAnnotation(AnnotationType.Widget, rect)
@@ -807,6 +940,9 @@ public class PdfListBoxFormField <: PdfFormField {
  */
 public class PdfPushButtonFormField <: PdfFormField {
     private var caption: String
+    private var filled: Bool = true
+
+    public func setFilled(f: Bool): Unit { filled = f }
 
     /**
      * 构造函数
@@ -857,7 +993,7 @@ public class PdfPushButtonFormField <: PdfFormField {
                     }
                 case None => ()
             }
-            let normalStream = FormAppearanceBuilder.buildPushButtonStream(w, h, captionText)
+            let normalStream = FormAppearanceBuilder.buildPushButtonStream(w, h, captionText, filled)
             let normalDict = PdfDictionary()
             normalDict.put(PdfName("N"), normalStream)
             wDict.put(PdfName("AP"), normalDict)
