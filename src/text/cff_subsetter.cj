@@ -1,24 +1,15 @@
 /**
- * PDF-CJ: CFFSubsetter - CFF（紧凑字体格式）子集化
+ * PDF-CJ: CFFSubsetter - CFF 子集化（三级优化）
  *
- * 算法：
- *   1. 从 CFF 头部导航到 CharStrings INDEX（经由 Name/TopDict/String/GlobalSubr INDEX）
- *   2. 从 TopDict 找到 CharStrings 偏移和 FDArray 偏移
- *   3. 重建 CharStrings INDEX：已用字形保留原始 charstring，未用字形替换为单字节 endchar(0x0e)
- *   4. 更新 TopDict 中的 FDArray 偏移引用（减去 delta）
- *   5. 更新 FDArray 中每个 FD dict 的 Private 偏移引用（减去 delta）
- *   6. 拼接 part1 + 新 CharStrings INDEX + part3
- *
- * 对于 NotoSansCJK（65535 字形，15MB）：
- *   仅用 50 个字形时，新 CharStrings INDEX ≈ 272KB，整体 CFF 从 15MB → ~1.5MB
+ *   1. CharStrings INDEX 紧凑化：count = maxUsedGID+1
+ *   2. FD 级别子集化：未使用 FD 的 Local Subrs → 空 INDEX
+ *   3. 子程序级别子集化：解析各 charstring，找出被调用的子程序（传递闭包），
+ *      未被调用的子程序替换为单字节 return(0x0B)，大幅缩小 Local Subrs INDEX
  */
 package pdf_cj.text
 
 import std.collection.{HashMap, ArrayList}
 
-/**
- * CFF 子集化器
- */
 public class CFFSubsetter {
     private let cff: Array<UInt8>
     private let usedGlyphs: HashMap<UInt16, Bool>
@@ -28,142 +19,549 @@ public class CFFSubsetter {
         this.usedGlyphs = usedGlyphs
     }
 
-    /**
-     * 生成 CFF 子集数据
-     * @return 子集 CFF 字节数组；若无法子集化则返回原始数据
-     */
     public func generateSubset(): Array<UInt8> {
         if (cff.size < 8 || usedGlyphs.isEmpty()) { return cff }
 
-        // === 1. 导航到 CharStrings INDEX，收集关键偏移 ===
         let hdrSize = Int64(cff[2])
         var pos = hdrSize
-
-        pos = skipIndex(pos)             // Name INDEX
+        pos = skipIndex(pos)
         let topDictIdxPos = pos
-        pos = skipIndex(pos)             // TopDict INDEX
-        pos = skipIndex(pos)             // String INDEX
-        pos = skipIndex(pos)             // Global Subr INDEX
+        pos = skipIndex(pos)
+        pos = skipIndex(pos)
+        pos = skipIndex(pos)
 
-        // 读取 TopDict 条目（通常只有 1 个）
         let topDictOffset = getIndexItemOffset(cff, topDictIdxPos, 0)
         let topDictLen    = getIndexItemLength(cff, topDictIdxPos, 0)
         if (topDictOffset < 0 || topDictLen <= 0) { return cff }
 
-        // === 2. 从 TopDict 解析 CharStrings 偏移、FDArray 偏移、FDSelect 偏移 ===
         let charstringsOff = findDictInt(cff, topDictOffset, topDictLen, 17i32, -1i32)
         let fdArrayOff     = findDictInt(cff, topDictOffset, topDictLen, 12i32, 36i32)
         let fdSelectOff    = findDictInt(cff, topDictOffset, topDictLen, 12i32, 37i32)
         if (charstringsOff < 0) { return cff }
 
-        // === 3. 读取 CharStrings INDEX 元数据 ===
-        let csEnd = getIndexEnd(cff, charstringsOff)  // charstrings_off + INDEX 大小
+        let csEnd = getIndexEnd(cff, charstringsOff)
         if (csEnd <= charstringsOff) { return cff }
 
-        // === 4. 构建新 CharStrings INDEX ===
         let newCS = buildNewCharstrings(charstringsOff, csEnd)
-        let delta = (csEnd - charstringsOff) - Int64(newCS.size)
-        if (delta <= 0) { return cff }  // 没有实质缩减，不值得处理
+        let csDelta = (csEnd - charstringsOff) - Int64(newCS.size)
 
-        // === 5. 复制 part1（CharStrings 之前），更新 TopDict FDArray 和 FDSelect 偏移 ===
+        let nGlyphs = Int64(readUInt16(charstringsOff))
+        let usedFDs = findUsedFDs(fdSelectOff, nGlyphs)
+
+        let newFDArrayAbsStart = charstringsOff + Int64(newCS.size)
+        var newPart3 = Array<UInt8>(0, repeat: UInt8(0))
+        if (fdArrayOff >= csEnd) {
+            newPart3 = buildNewFDSection(fdArrayOff, newFDArrayAbsStart, usedFDs,
+                                         charstringsOff, fdSelectOff)
+        } else {
+            let part3old = copyRange(cff, csEnd, cff.size)
+            if (fdArrayOff >= 0) {
+                updateFDPrivateOffsets(part3old, fdArrayOff - csEnd, csDelta)
+            }
+            newPart3 = part3old
+        }
+
         let part1 = copyRange(cff, 0, charstringsOff)
-        if (fdArrayOff >= 0) {
-            let newFDArrayOff = fdArrayOff - delta
-            updateDictInt32(part1, topDictOffset, topDictLen, 12i32, 36i32, newFDArrayOff)
-        }
-        if (fdSelectOff >= 0) {
-            let newFDSelectOff = fdSelectOff - delta
-            updateDictInt32(part1, topDictOffset, topDictLen, 12i32, 37i32, newFDSelectOff)
+        if (fdArrayOff >= csEnd) {
+            updateDictInt32(part1, topDictOffset, topDictLen, 12i32, 36i32, newFDArrayAbsStart)
+        } else if (fdArrayOff >= 0) {
+            updateDictInt32(part1, topDictOffset, topDictLen, 12i32, 36i32, fdArrayOff - csDelta)
         }
 
-        // === 6. 复制 part3（CharStrings 之后 = FDArray+Private+LocalSubrs），更新 Private 偏移 ===
-        let part3 = copyRange(cff, csEnd, cff.size)
-        if (fdArrayOff >= 0 && fdArrayOff >= csEnd) {
-            // FDArray 在 part3 中的位置
-            let fdArrayInPart3 = fdArrayOff - csEnd
-            updateFDPrivateOffsets(part3, fdArrayInPart3, delta)
-        }
-
-        // === 7. 拼接 part1 + newCS + part3 ===
-        let totalSize = part1.size + newCS.size + part3.size
+        let totalSize = part1.size + newCS.size + newPart3.size
+        if (totalSize <= 0 || Int64(totalSize) >= Int64(cff.size)) { return cff }
         let result = Array<UInt8>(Int64(totalSize), repeat: UInt8(0))
         var rpos: Int64 = 0
-        for (i in 0..part1.size)  { result[rpos] = part1[i];  rpos += 1 }
-        for (i in 0..newCS.size)  { result[rpos] = newCS[i];  rpos += 1 }
-        for (i in 0..part3.size)  { result[rpos] = part3[i];  rpos += 1 }
+        for (i in 0..part1.size)    { result[rpos] = part1[i];    rpos += 1 }
+        for (i in 0..newCS.size)    { result[rpos] = newCS[i];    rpos += 1 }
+        for (i in 0..newPart3.size) { result[rpos] = newPart3[i]; rpos += 1 }
         result
     }
 
-    // ===== 构建新 CharStrings INDEX =====
+    // ===== 找出实际用到的 FD =====
 
-    private func buildNewCharstrings(csOff: Int64, csEnd: Int64): Array<UInt8> {
-        // 读取原始 INDEX 元数据
-        let originalCount = Int64(readUInt16(csOff))
-        if (originalCount == 0) { return buildEmptyIndex() }
-        let offsize = Int64(cff[csOff + 2])
-        if (offsize < 1 || offsize > 4) { return buildEmptyIndex() }
-
-        // 将 count 裁剪到 maxUsedGlyph+1，避免保留大量空白尾部槽位
-        var maxGlyph: Int64 = 0
-        for ((gid, _) in usedGlyphs) {
-            if (Int64(gid) > maxGlyph) { maxGlyph = Int64(gid) }
+    private func findUsedFDs(fdSelectOff: Int64, nGlyphs: Int64): HashMap<Int32, Bool> {
+        let used = HashMap<Int32, Bool>()
+        if (fdSelectOff < 0 || fdSelectOff >= cff.size) { return used }
+        let fmt = Int32(cff[fdSelectOff])
+        if (fmt == 0) {
+            for ((gid, _) in usedGlyphs) {
+                let g = Int64(gid)
+                let p = fdSelectOff + 1 + g
+                if (p < cff.size) { used[Int32(cff[p])] = true }
+            }
+        } else if (fmt == 3) {
+            let nRanges = (Int64(cff[fdSelectOff + 1]) << 8) | Int64(cff[fdSelectOff + 2])
+            let rs = fdSelectOff + 3
+            var ranges = ArrayList<(Int64, Int32)>()
+            var r: Int64 = 0
+            while (r < nRanges) {
+                let off = rs + r * 3
+                if (off + 2 >= cff.size) { break }
+                ranges.add(((Int64(cff[off]) << 8) | Int64(cff[off + 1]), Int32(cff[off + 2])))
+                r += 1
+            }
+            for ((gid, _) in usedGlyphs) {
+                let g = Int64(gid)
+                var fd: Int32 = 0
+                for (ri in 0..ranges.size) {
+                    let (sg, rfd) = ranges[ri]
+                    if (sg <= g) { fd = rfd } else { break }
+                }
+                used[fd] = true
+            }
         }
-        let count = if (maxGlyph + 1 < originalCount) { maxGlyph + 1 } else { originalCount }
+        used
+    }
 
-        let offsetsStart = csOff + 3
-        let dataStart = offsetsStart + (originalCount + 1) * offsize
+    // 找出属于特定 FD 的已用 GID
+    private func getUsedGIDsForFD(fdIdx: Int32, fdSelectOff: Int64, nGlyphs: Int64): ArrayList<Int64> {
+        let result = ArrayList<Int64>()
+        if (fdSelectOff < 0 || fdSelectOff >= cff.size) { return result }
+        let fmt = Int32(cff[fdSelectOff])
+        if (fmt == 0) {
+            for ((gid, _) in usedGlyphs) {
+                let g = Int64(gid)
+                let p = fdSelectOff + 1 + g
+                if (p < cff.size && Int32(cff[p]) == fdIdx) { result.add(g) }
+            }
+        } else if (fmt == 3) {
+            let nRanges = (Int64(cff[fdSelectOff + 1]) << 8) | Int64(cff[fdSelectOff + 2])
+            let rs = fdSelectOff + 3
+            var ranges = ArrayList<(Int64, Int32)>()
+            var r: Int64 = 0
+            while (r < nRanges) {
+                let off = rs + r * 3
+                if (off + 2 >= cff.size) { break }
+                ranges.add(((Int64(cff[off]) << 8) | Int64(cff[off + 1]), Int32(cff[off + 2])))
+                r += 1
+            }
+            for ((gid, _) in usedGlyphs) {
+                let g = Int64(gid)
+                var fd: Int32 = 0
+                for (ri in 0..ranges.size) {
+                    let (sg, rfd) = ranges[ri]
+                    if (sg <= g) { fd = rfd } else { break }
+                }
+                if (fd == fdIdx) { result.add(g) }
+            }
+        }
+        result
+    }
 
-        // 收集每个字形的 charstring 数据
-        var pieces = ArrayList<Array<UInt8>>()
-        let endchar = Array<UInt8>(1, repeat: UInt8(0x0E))  // minimal endchar
-        var totalDataSize: Int64 = 0
+    // ===== 构建新 FD 段 =====
 
-        for (i in 0..count) {
-            let gOff = readOffset(offsetsStart, offsize, i)
-            let gEnd = readOffset(offsetsStart, offsize, i + 1)
-            let gLen = gEnd - gOff
-            if (isGlyphUsed(UInt16(i)) && gLen > 0 && gOff >= 0 && gEnd <= (csEnd - dataStart + 1)) {
-                let abs = dataStart + gOff - 1
-                if (abs >= 0 && abs + gLen <= cff.size) {
-                    let piece = Array<UInt8>(gLen, repeat: UInt8(0))
-                    for (j in 0..gLen) { piece[j] = cff[abs + j] }
-                    pieces.add(piece)
-                    totalDataSize += gLen
+    private func buildNewFDSection(
+        fdArrayOff: Int64, newFDArrayAbsStart: Int64,
+        usedFDs: HashMap<Int32, Bool>,
+        charstringsOff: Int64, fdSelectOff: Int64
+    ): Array<UInt8> {
+        if (fdArrayOff < 0 || fdArrayOff + 3 > cff.size) {
+            return Array<UInt8>(0, repeat: UInt8(0))
+        }
+        let fdCount = Int64(readUInt16(fdArrayOff))
+        if (fdCount == 0) { return Array<UInt8>(0, repeat: UInt8(0)) }
+        let fdOffsize = Int64(cff[fdArrayOff + 2])
+        if (fdOffsize < 1 || fdOffsize > 4) { return Array<UInt8>(0, repeat: UInt8(0)) }
+        let fdDataStart = fdArrayOff + 3 + (fdCount + 1) * fdOffsize
+
+        // 解析每个 FD 的 Private DICT 信息
+        var fdInfos = ArrayList<(Int64, Int64, Int64)>()
+        for (fi in 0..fdCount) {
+            let o1 = readOffsetFromCff(fdArrayOff + 3 + fi * fdOffsize, fdOffsize)
+            let o2 = readOffsetFromCff(fdArrayOff + 3 + (fi + 1) * fdOffsize, fdOffsize)
+            if (o2 <= o1) { fdInfos.add((0i64, 0i64, -1i64)); continue }
+            let fdStart = fdDataStart + o1 - 1
+            let fdLen = o2 - o1
+            let privSize = findDictFirstInt(cff, fdStart, fdLen, 18i32)
+            let privOff  = findDictInt(cff, fdStart, fdLen, 18i32, -1i32)
+            var subrsRel: Int64 = -1
+            if (privOff > 0 && privSize > 0) {
+                subrsRel = findDictInt(cff, privOff, privSize, 19i32, -1i32)
+            }
+            fdInfos.add((privOff, privSize, subrsRel))
+        }
+
+        // 预构建 CharStrings 数据索引（用于子程序解析）
+        let nGlyphs = Int64(readUInt16(charstringsOff))
+
+        // 为每个 FD 构建 PrivDict + LocalSubrs
+        var fdPieces = ArrayList<(Array<UInt8>, Array<UInt8>)>()
+        for (fi in 0..fdCount) {
+            let (privOff, privSize, subrsRel) = fdInfos[fi]
+            let isFDUsed = usedFDs.contains(Int32(fi))
+
+            // 新 PrivateDict
+            var newPriv: Array<UInt8>
+            if (privOff > 0 && privSize > 0 && privOff + privSize <= cff.size) {
+                let origPriv = copyRange(cff, privOff, privOff + privSize)
+                newPriv = if (subrsRel >= 0) {
+                    patchPrivateDictSubrs(origPriv, privSize, !isFDUsed)
                 } else {
-                    pieces.add(endchar)
-                    totalDataSize += 1
+                    origPriv
                 }
             } else {
-                pieces.add(endchar)
+                newPriv = Array<UInt8>(0, repeat: UInt8(0))
+            }
+
+            // 新 LocalSubrs
+            var newSubrs: Array<UInt8>
+            if (subrsRel >= 0 && isFDUsed) {
+                let subrsAbs = privOff + subrsRel
+                if (subrsAbs > 0 && subrsAbs < cff.size) {
+                    let subrsEnd = getIndexEnd(cff, subrsAbs)
+                    if (subrsEnd > subrsAbs) {
+                        // 子程序级子集化
+                        let gidsForFD = getUsedGIDsForFD(Int32(fi), fdSelectOff, nGlyphs)
+                        let neededSubrs = findNeededSubrs(gidsForFD, charstringsOff, subrsAbs)
+                        newSubrs = subsetSubrsIndex(subrsAbs, subrsEnd, neededSubrs)
+                    } else {
+                        newSubrs = emptyIndex()
+                    }
+                } else {
+                    newSubrs = emptyIndex()
+                }
+            } else if (subrsRel >= 0) {
+                newSubrs = emptyIndex()
+            } else {
+                newSubrs = Array<UInt8>(0, repeat: UInt8(0))
+            }
+            fdPieces.add((newPriv, newSubrs))
+        }
+
+        // 计算 FDArray INDEX 大小
+        var fdDictDataSize: Int64 = 0
+        for (fi in 0..fdCount) {
+            let (privOff, privSize, _) = fdInfos[fi]
+            let pse = if (privOff > 0 && privSize > 0) { cffIntSize(privSize) } else { 1 }
+            fdDictDataSize += pse + 5 + 1
+        }
+        let fdIdxOffsize: Int64 = if (fdDictDataSize + 1 <= 255) { 1 }
+                                  else if (fdDictDataSize + 1 <= 65535) { 2 }
+                                  else { 4 }
+        let fdIdxSize = 3 + (fdCount + 1) * fdIdxOffsize + fdDictDataSize
+
+        // 计算新 PrivateDict 绝对偏移
+        var cumAbsOff = newFDArrayAbsStart + fdIdxSize
+        var newPrivAbsOffs = ArrayList<Int64>()
+        for (fi in 0..fdCount) {
+            newPrivAbsOffs.add(cumAbsOff)
+            let (newPriv, newSubrs) = fdPieces[fi]
+            cumAbsOff += newPriv.size + newSubrs.size
+        }
+
+        let totalSize = cumAbsOff - newFDArrayAbsStart
+        let out = Array<UInt8>(Int64(totalSize), repeat: UInt8(0))
+        var wp: Int64 = 0
+
+        out[wp] = UInt8((UInt64(fdCount) >> 8) & 0xFF); wp += 1
+        out[wp] = UInt8(UInt64(fdCount) & 0xFF);        wp += 1
+        out[wp] = UInt8(fdIdxOffsize);                   wp += 1
+
+        let offTableStart = wp
+        wp += (fdCount + 1) * fdIdxOffsize
+
+        var fd1Based = ArrayList<Int64>()
+        fd1Based.add(1i64)
+        let fdDictDataStart = wp
+        for (fi in 0..fdCount) {
+            let (privOff, privSize, _) = fdInfos[fi]
+            let privAbsOff = newPrivAbsOffs[fi]
+            let psBytes = encodeCFFInt(if (privOff > 0 && privSize > 0) { privSize } else { 0i64 })
+            for (b in 0..psBytes.size) { out[wp] = psBytes[b]; wp += 1 }
+            let v = UInt64(privAbsOff) & 0xFFFFFFFFu64
+            out[wp] = 29u8; wp += 1
+            out[wp] = UInt8((v >> 24) & 0xFF); wp += 1
+            out[wp] = UInt8((v >> 16) & 0xFF); wp += 1
+            out[wp] = UInt8((v >> 8) & 0xFF);  wp += 1
+            out[wp] = UInt8(v & 0xFF);          wp += 1
+            out[wp] = 18u8; wp += 1
+            fd1Based.add(wp - fdDictDataStart + 1)
+        }
+        for (fi in 0..(fdCount + 1)) {
+            writeOffsetBE(out, offTableStart + fi * fdIdxOffsize, fdIdxOffsize, fd1Based[fi])
+        }
+        for (fi in 0..fdCount) {
+            let (newPriv, newSubrs) = fdPieces[fi]
+            for (b in 0..newPriv.size)  { out[wp] = newPriv[b];  wp += 1 }
+            for (b in 0..newSubrs.size) { out[wp] = newSubrs[b]; wp += 1 }
+        }
+        out
+    }
+
+    // ===== 子程序级子集化 =====
+
+    // 计算 Local Subrs INDEX 的偏置值
+    private func localSubrBias(count: Int64): Int64 {
+        if (count < 1240) { 107 }
+        else if (count < 33900) { 1131 }
+        else { 32768 }
+    }
+
+    // 找出所有被用到的子程序索引（传递闭包）
+    private func findNeededSubrs(
+        gids: ArrayList<Int64>, charstringsOff: Int64, localSubrsAbs: Int64
+    ): HashMap<Int64, Bool> {
+        let needed = HashMap<Int64, Bool>()
+        if (gids.isEmpty()) { return needed }
+
+        let subrsCount = Int64(readUInt16(localSubrsAbs))
+        let bias = localSubrBias(subrsCount)
+
+        let subrsOffsize = Int64(cff[localSubrsAbs + 2])
+        if (subrsOffsize < 1 || subrsOffsize > 4) { return needed }
+        let subrsOffsetsStart = localSubrsAbs + 3
+        let subrsDataStart = subrsOffsetsStart + (subrsCount + 1) * subrsOffsize
+
+        // 预先读取所有子程序的字节范围
+        var subrPieces = ArrayList<(Int64, Int64)>()  // (dataStart, length)
+        for (si in 0..subrsCount) {
+            let o1 = readOffsetFromCff(subrsOffsetsStart + si * subrsOffsize, subrsOffsize)
+            let o2 = readOffsetFromCff(subrsOffsetsStart + (si + 1) * subrsOffsize, subrsOffsize)
+            let abs1 = subrsDataStart + o1 - 1
+            let len  = o2 - o1
+            if (abs1 >= 0 && abs1 + len <= cff.size && len > 0) {
+                subrPieces.add((abs1, len))
+            } else {
+                subrPieces.add((-1i64, 0i64))
+            }
+        }
+
+        // 对每个用到的 GID，解析 charstring，收集被调用的子程序
+        let csOffsize = Int64(cff[charstringsOff + 2])
+        let csCount   = Int64(readUInt16(charstringsOff))
+        if (csOffsize < 1 || csOffsize > 4) { return needed }
+        let csOffsetsStart = charstringsOff + 3
+        let csDataStart    = csOffsetsStart + (csCount + 1) * csOffsize
+
+        for (gi in 0..gids.size) {
+            let gid = gids[gi]
+            if (gid < 0 || gid >= csCount) { continue }
+            let o1 = readOffsetFromCff(csOffsetsStart + gid * csOffsize, csOffsize)
+            let o2 = readOffsetFromCff(csOffsetsStart + (gid + 1) * csOffsize, csOffsize)
+            let abs1 = csDataStart + o1 - 1
+            let len  = o2 - o1
+            if (abs1 >= 0 && abs1 + len <= cff.size && len > 0) {
+                collectCalledSubrs(abs1, len, subrPieces, bias, needed, 0i32)
+            }
+        }
+        needed
+    }
+
+    // 解析 Type 2 charstring，递归收集被调用的 Local Subrs 索引
+    private func collectCalledSubrs(
+        dataAbs: Int64, dataLen: Int64,
+        subrPieces: ArrayList<(Int64, Int64)>,
+        bias: Int64,
+        needed: HashMap<Int64, Bool>,
+        depth: Int32
+    ): Unit {
+        if (depth > 10 || dataLen <= 0) { return }
+        var i: Int64 = 0
+        var stack = ArrayList<Int64>()
+
+        while (i < dataLen) {
+            let bPos = dataAbs + i
+            if (bPos >= cff.size) { break }
+            let b = Int32(cff[bPos])
+
+            if (b == 10) {
+                // callsubr: 弹出栈顶，加偏置 = 子程序索引
+                if (stack.size > 0) {
+                    let biasedIdx = stack[stack.size - 1]
+                    stack.remove((stack.size - 1)..stack.size)
+                    let actualIdx = biasedIdx + bias
+                    if (actualIdx >= 0 && Int64(actualIdx) < subrPieces.size) {
+                        if (!needed.contains(actualIdx)) {
+                            needed[actualIdx] = true
+                            let (sAbs, sLen) = subrPieces[Int64(actualIdx)]
+                            if (sAbs >= 0 && sLen > 0) {
+                                collectCalledSubrs(sAbs, sLen, subrPieces, bias, needed, depth + 1)
+                            }
+                        }
+                    }
+                }
+                i += 1
+            } else if (b == 11 || b == 14) {
+                break  // return / endchar
+            } else if (b == 29) {
+                // callgsubr：不追踪全局子程序，只弹栈
+                if (stack.size > 0) { stack.remove((stack.size - 1)..stack.size) }
+                i += 1
+            } else if (b == 28) {
+                if (bPos + 2 < cff.size) {
+                    let v = (Int64(cff[bPos + 1]) << 8) | Int64(cff[bPos + 2])
+                    stack.add(if (v >= 32768) { v - 65536 } else { v })
+                }
+                i += 3
+            } else if (b == 255) {
+                // 4 字节定点数（非整数）
+                i += 5
+            } else if (32 <= b && b <= 246) {
+                stack.add(Int64(b - 139)); i += 1
+            } else if (247 <= b && b <= 250) {
+                if (bPos + 1 < cff.size) {
+                    stack.add(Int64((b - 247) * 256 + Int32(cff[bPos + 1]) + 108))
+                }
+                i += 2
+            } else if (251 <= b && b <= 254) {
+                if (bPos + 1 < cff.size) {
+                    stack.add(Int64(-((b - 251) * 256 + Int32(cff[bPos + 1]) + 108)))
+                }
+                i += 2
+            } else if (b == 12) {
+                // escape 操作符（2 字节），清空栈
+                stack = ArrayList<Int64>()
+                i += 2
+            } else {
+                // 其他操作符，清空栈
+                stack = ArrayList<Int64>()
+                i += 1
+            }
+        }
+    }
+
+    // 重建 Local Subrs INDEX，未使用条目替换为单字节 return(0x0B)
+    private func subsetSubrsIndex(
+        subrsAbs: Int64, subrsEnd: Int64, needed: HashMap<Int64, Bool>
+    ): Array<UInt8> {
+        let count = Int64(readUInt16(subrsAbs))
+        if (count == 0) { return emptyIndex() }
+        let offsize = Int64(cff[subrsAbs + 2])
+        if (offsize < 1 || offsize > 4) { return emptyIndex() }
+        let offsetsStart = subrsAbs + 3
+        let dataStart    = offsetsStart + (count + 1) * offsize
+
+        let retByte = Array<UInt8>(1, repeat: 11u8)  // return(0x0B)
+        var pieces = ArrayList<Array<UInt8>>()
+        var totalDataSize: Int64 = 0
+
+        for (si in 0..count) {
+            let o1 = readOffsetFromCff(offsetsStart + si * offsize, offsize)
+            let o2 = readOffsetFromCff(offsetsStart + (si + 1) * offsize, offsize)
+            let abs1 = dataStart + o1 - 1
+            let len  = o2 - o1
+            if (needed.contains(Int64(si)) && abs1 >= 0 && abs1 + len <= cff.size && len > 0) {
+                pieces.add(copyRange(cff, abs1, abs1 + len))
+                totalDataSize += len
+            } else {
+                pieces.add(retByte)
                 totalDataSize += 1
             }
         }
 
-        // 确定新 offsize（需容纳 totalDataSize + 1，因为偏移是 1-based）
         let maxOff = totalDataSize + 1
         let newOffsize: Int64 = if (maxOff <= 255) { 1 }
                                 else if (maxOff <= 65535) { 2 }
                                 else if (maxOff <= 16777215) { 3 }
                                 else { 4 }
 
-        // 写出新 INDEX
-        let headerSize = 3 + (count + 1) * newOffsize
-        let output = Array<UInt8>(Int64(headerSize) + totalDataSize, repeat: UInt8(0))
-        var pos: Int64 = 0
+        let hdrSize = 3 + (count + 1) * newOffsize
+        let out = Array<UInt8>(Int64(hdrSize) + totalDataSize, repeat: UInt8(0))
+        var wp: Int64 = 0
+        out[wp] = UInt8((UInt64(count) >> 8) & 0xFF); wp += 1
+        out[wp] = UInt8(UInt64(count) & 0xFF);        wp += 1
+        out[wp] = UInt8(newOffsize);                   wp += 1
+        var curOff: Int64 = 1
+        for (i in 0..(count + 1)) {
+            writeOffsetBE(out, wp, newOffsize, curOff)
+            wp += newOffsize
+            if (i < pieces.size) { curOff += pieces[i].size }
+        }
+        for (i in 0..pieces.size) {
+            let p = pieces[i]
+            for (j in 0..p.size) { out[wp] = p[j]; wp += 1 }
+        }
+        out
+    }
 
-        // count (2 bytes)
+    // ===== Private DICT 修改 =====
+
+    private func patchPrivateDictSubrs(
+        origBytes: Array<UInt8>, newSubrsOff: Int64, remove: Bool
+    ): Array<UInt8> {
+        let result = Array<UInt8>(origBytes.size, repeat: UInt8(0))
+        for (i in 0..origBytes.size) { result[i] = origBytes[i] }
+        var pos: Int64 = 0
+        var lastOpStart: Int64 = -1
+        while (pos < origBytes.size) {
+            let b = Int32(origBytes[pos])
+            if (b == 29) { lastOpStart = pos; pos += 5 }
+            else if (b == 28) { lastOpStart = pos; pos += 3 }
+            else if (32 <= b && b <= 246) { lastOpStart = pos; pos += 1 }
+            else if (247 <= b && b <= 254) { lastOpStart = pos; pos += 2 }
+            else if (b == 12) { lastOpStart = -1; pos += 2 }
+            else {
+                if (b == 19 && lastOpStart >= 0) {
+                    let rangeStart = lastOpStart
+                    let rangeEnd   = pos + 1
+                    let rangeLen   = rangeEnd - rangeStart
+                    if (remove) {
+                        for (j in rangeStart..rangeEnd) { result[j] = 140u8 }
+                    } else {
+                        let padLen = rangeLen - 2
+                        for (j in rangeStart..(rangeStart + padLen)) { result[j] = 140u8 }
+                        result[rangeStart + padLen]     = UInt8(newSubrsOff + 139)
+                        result[rangeStart + padLen + 1] = 19u8
+                    }
+                    return result
+                }
+                lastOpStart = -1; pos += 1
+            }
+        }
+        result
+    }
+
+    // ===== CharStrings INDEX 紧凑化 =====
+
+    private func buildNewCharstrings(csOff: Int64, csEnd: Int64): Array<UInt8> {
+        let originalCount = Int64(readUInt16(csOff))
+        if (originalCount == 0) { return emptyIndex() }
+        let offsize = Int64(cff[csOff + 2])
+        if (offsize < 1 || offsize > 4) { return emptyIndex() }
+        var maxGlyph: Int64 = 0
+        for ((gid, _) in usedGlyphs) {
+            if (Int64(gid) > maxGlyph) { maxGlyph = Int64(gid) }
+        }
+        let count = if (maxGlyph + 1 < originalCount) { maxGlyph + 1 } else { originalCount }
+        let offsetsStart = csOff + 3
+        let dataStart    = offsetsStart + (originalCount + 1) * offsize
+        let endchar = Array<UInt8>(1, repeat: 14u8)
+        var pieces = ArrayList<Array<UInt8>>()
+        var totalDataSize: Int64 = 0
+        for (i in 0..count) {
+            let gOff = readOffsetFromCff(offsetsStart + i * offsize, offsize)
+            let gEnd = readOffsetFromCff(offsetsStart + (i + 1) * offsize, offsize)
+            let gLen = gEnd - gOff
+            if (isGlyphUsed(UInt16(i)) && gLen > 0 && gOff >= 0 && gEnd <= (csEnd - dataStart + 1)) {
+                let abs = dataStart + gOff - 1
+                if (abs >= 0 && abs + gLen <= cff.size) {
+                    pieces.add(copyRange(cff, abs, abs + gLen))
+                    totalDataSize += gLen
+                } else {
+                    pieces.add(endchar); totalDataSize += 1
+                }
+            } else {
+                pieces.add(endchar); totalDataSize += 1
+            }
+        }
+        let maxOff = totalDataSize + 1
+        let newOffsize: Int64 = if (maxOff <= 255) { 1 }
+                                else if (maxOff <= 65535) { 2 }
+                                else if (maxOff <= 16777215) { 3 }
+                                else { 4 }
+        let hdrSize = 3 + (count + 1) * newOffsize
+        let output = Array<UInt8>(Int64(hdrSize) + totalDataSize, repeat: UInt8(0))
+        var pos: Int64 = 0
         output[pos] = UInt8((UInt64(count) >> 8) & 0xFF); pos += 1
-        output[pos] = UInt8(UInt64(count) & 0xFF); pos += 1
-        // offsize (1 byte)
-        output[pos] = UInt8(newOffsize); pos += 1
-        // offsets (1-based)
+        output[pos] = UInt8(UInt64(count) & 0xFF);        pos += 1
+        output[pos] = UInt8(newOffsize);                   pos += 1
         var curOff: Int64 = 1
         for (i in 0..(count + 1)) {
             writeOffsetBE(output, pos, newOffsize, curOff)
             pos += newOffsize
             if (i < pieces.size) { curOff += pieces[i].size }
         }
-        // data
         for (i in 0..pieces.size) {
             let p = pieces[i]
             for (j in 0..p.size) { output[pos] = p[j]; pos += 1 }
@@ -171,146 +569,137 @@ public class CFFSubsetter {
         output
     }
 
-    private func buildEmptyIndex(): Array<UInt8> {
-        // Empty CFF INDEX: count=0 (2 bytes)
-        let d = Array<UInt8>(2, repeat: UInt8(0))
-        d
+    // ===== 辅助 =====
+
+    private func cffIntSize(value: Int64): Int64 {
+        if (-107 <= value && value <= 107) { 1 }
+        else if (-1131 <= value && value <= 1131) { 2 }
+        else if (-32768 <= value && value <= 32767) { 3 }
+        else { 5 }
     }
 
-    private func isGlyphUsed(gid: UInt16): Bool {
-        usedGlyphs.contains(gid)
+    private func encodeCFFInt(value: Int64): Array<UInt8> {
+        if (-107 <= value && value <= 107) {
+            Array<UInt8>(1, repeat: UInt8(value + 139))
+        } else if (108 <= value && value <= 1131) {
+            let r = Array<UInt8>(2, repeat: UInt8(0))
+            r[0] = UInt8((value - 108) / 256 + 247)
+            r[1] = UInt8((value - 108) % 256)
+            r
+        } else if (-1131 <= value && value <= -108) {
+            let r = Array<UInt8>(2, repeat: UInt8(0))
+            r[0] = UInt8((-value - 108) / 256 + 251)
+            r[1] = UInt8((-value - 108) % 256)
+            r
+        } else if (-32768 <= value && value <= 32767) {
+            let r = Array<UInt8>(3, repeat: UInt8(0))
+            r[0] = 28u8
+            r[1] = UInt8((UInt64(value) >> 8) & 0xFF)
+            r[2] = UInt8(UInt64(value) & 0xFF)
+            r
+        } else {
+            let r = Array<UInt8>(5, repeat: UInt8(0))
+            let v = UInt64(value) & 0xFFFFFFFFu64
+            r[0] = 29u8
+            r[1] = UInt8((v >> 24) & 0xFF); r[2] = UInt8((v >> 16) & 0xFF)
+            r[3] = UInt8((v >> 8) & 0xFF);  r[4] = UInt8(v & 0xFF)
+            r
+        }
     }
 
-    // ===== 更新 TopDict 中的 FDArray 偏移 =====
+    private func emptyIndex(): Array<UInt8> { Array<UInt8>(2, repeat: UInt8(0)) }
 
-    /** 在 part1（TopDict INDEX 所在区域）中原地更新指定操作符的最后一个 int32 操作数 */
-    private func updateDictInt32(data: Array<UInt8>, dictStart: Int64, dictLen: Int64,
-                                 op1: Int32, op2: Int32, newValue: Int64): Unit {
-        // 找到目标操作符之前的最后一个 int32 操作数并更新
-        var pos: Int64 = dictStart
+    private func isGlyphUsed(gid: UInt16): Bool { usedGlyphs.contains(gid) }
+
+    private func findDictFirstInt(data: Array<UInt8>, dictStart: Int64, dictLen: Int64, op1: Int32): Int64 {
+        var pos = dictStart
         let dictEnd = dictStart + dictLen
-        var lastInt32Pos: Int64 = -1  // 最近一个 int32 操作数的位置
-
+        var stack = ArrayList<Int64>()
         while (pos < dictEnd) {
             let b = Int32(data[pos])
-            if (b == 29) {
-                // 5 字节 int32
-                lastInt32Pos = pos
-                pos += 5
-            } else if (b == 28) {
-                lastInt32Pos = -1  // int16，重置（我们只替换 int32）
-                pos += 3
-            } else if (32 <= b && b <= 246) {
-                lastInt32Pos = -1
-                pos += 1
-            } else if (247 <= b && b <= 250) {
-                lastInt32Pos = -1
-                pos += 2
-            } else if (251 <= b && b <= 254) {
-                lastInt32Pos = -1
-                pos += 2
-            } else if (b == 12 && pos + 1 < dictEnd) {
-                // 2 字节操作符
+            if (b == 29 && pos + 5 <= dictEnd) { stack.add(readInt32BEFromArray(data, pos + 1)); pos += 5 }
+            else if (b == 28 && pos + 3 <= dictEnd) { stack.add(readInt16BEFromArray(data, pos + 1)); pos += 3 }
+            else if (32 <= b && b <= 246) { stack.add(Int64(b - 139)); pos += 1 }
+            else if (247 <= b && b <= 250 && pos + 2 <= dictEnd) {
+                stack.add(Int64((b - 247) * 256 + Int32(data[pos + 1]) + 108)); pos += 2 }
+            else if (251 <= b && b <= 254 && pos + 2 <= dictEnd) {
+                stack.add(Int64(-((b - 251) * 256 + Int32(data[pos + 1]) + 108))); pos += 2 }
+            else if (b == 12 && pos + 2 <= dictEnd) { stack = ArrayList<Int64>(); pos += 2 }
+            else {
+                if (b == op1 && stack.size >= 1) { return stack[0] }
+                stack = ArrayList<Int64>(); pos += 1
+            }
+        }
+        -1
+    }
+
+    private func updateDictInt32(data: Array<UInt8>, dictStart: Int64, dictLen: Int64,
+                                 op1: Int32, op2: Int32, newValue: Int64): Unit {
+        var pos: Int64 = dictStart
+        let dictEnd = dictStart + dictLen
+        var lastInt32Pos: Int64 = -1
+        while (pos < dictEnd) {
+            let b = Int32(data[pos])
+            if (b == 29) { lastInt32Pos = pos; pos += 5 }
+            else if (b == 28) { lastInt32Pos = -1; pos += 3 }
+            else if (32 <= b && b <= 246) { lastInt32Pos = -1; pos += 1 }
+            else if (247 <= b && b <= 250) { lastInt32Pos = -1; pos += 2 }
+            else if (251 <= b && b <= 254) { lastInt32Pos = -1; pos += 2 }
+            else if (b == 12 && pos + 1 < dictEnd) {
                 let op2b = Int32(data[pos + 1])
-                if (b == op1 && op2b == op2) {
-                    // 找到目标操作符，更新之前的 int32 操作数
-                    if (lastInt32Pos >= 0) {
-                        writeInt32BE(data, lastInt32Pos + 1, newValue)
-                        return
-                    }
+                if (b == op1 && op2b == op2 && lastInt32Pos >= 0) {
+                    writeInt32BE(data, lastInt32Pos + 1, newValue); return
                 }
-                lastInt32Pos = -1
-                pos += 2
+                lastInt32Pos = -1; pos += 2
             } else {
-                // 单字节操作符
-                if (b == op1 && op2 < 0) {
-                    if (lastInt32Pos >= 0) {
-                        writeInt32BE(data, lastInt32Pos + 1, newValue)
-                        return
-                    }
+                if (b == op1 && op2 < 0 && lastInt32Pos >= 0) {
+                    writeInt32BE(data, lastInt32Pos + 1, newValue); return
                 }
-                lastInt32Pos = -1
-                pos += 1
+                lastInt32Pos = -1; pos += 1
             }
         }
     }
 
-    // ===== 更新 FD dict 中的 Private 偏移 =====
-
-    /** 在 part3 中更新 FDArray 内所有 FD dict 的 Private 偏移（减 delta） */
     private func updateFDPrivateOffsets(part3: Array<UInt8>, fdArrayPosInPart3: Int64, delta: Int64): Unit {
         if (fdArrayPosInPart3 < 0 || fdArrayPosInPart3 + 2 >= part3.size) { return }
-
         let count = Int64(readUInt16FromArray(part3, fdArrayPosInPart3))
         if (count == 0) { return }
         let offsize = Int64(part3[fdArrayPosInPart3 + 2])
         if (offsize < 1 || offsize > 4) { return }
-
         let offsetsStart = fdArrayPosInPart3 + 3
         let dataStart = offsetsStart + (count + 1) * offsize
-
         for (i in 0..count) {
             let itemOff = readOffsetFromArray(part3, offsetsStart, offsize, i)
             let itemEnd = readOffsetFromArray(part3, offsetsStart, offsize, i + 1)
-            let itemLen = itemEnd - itemOff
-            if (itemLen <= 0) { continue }
-
-            // FD dict 在 part3 中的实际位置（偏移是 1-based）
+            if (itemEnd <= itemOff) { continue }
             let fdStart = dataStart + itemOff - 1
-            if (fdStart < 0 || fdStart + itemLen > part3.size) { continue }
-
-            // Private 操作符 = 0x12 (18)，有 2 个操作数 [size, offset]
-            // 找到最后一个 int32 操作数（即 Private offset）
-            updateDictInt32Private(part3, fdStart, itemLen, delta)
+            if (fdStart < 0 || fdStart + (itemEnd - itemOff) > part3.size) { continue }
+            updateDictInt32Private(part3, fdStart, itemEnd - itemOff, delta)
         }
     }
 
-    /**
-     * 专门处理 FD dict 中 Private 操作符（0x12）的 offset 操作数更新
-     * Private 有两个操作数：[size, offset]，我们要更新 offset（最后一个 int32）
-     */
     private func updateDictInt32Private(data: Array<UInt8>, dictStart: Int64, dictLen: Int64, delta: Int64): Unit {
         var pos: Int64 = dictStart
         let dictEnd = dictStart + dictLen
         var lastInt32Pos: Int64 = -1
-
         while (pos < dictEnd) {
             let b = Int32(data[pos])
-            if (b == 29) {
-                lastInt32Pos = pos
-                pos += 5
-            } else if (b == 28) {
-                lastInt32Pos = -1
-                pos += 3
-            } else if (32 <= b && b <= 246) {
-                lastInt32Pos = -1
-                pos += 1
-            } else if (247 <= b && b <= 250) {
-                lastInt32Pos = -1
-                pos += 2
-            } else if (251 <= b && b <= 254) {
-                lastInt32Pos = -1
-                pos += 2
-            } else if (b == 12 && pos + 1 < dictEnd) {
-                lastInt32Pos = -1
-                pos += 2
-            } else if (b == 18) {
-                // Private 操作符：用之前的 int32 位置更新 offset
+            if (b == 29) { lastInt32Pos = pos; pos += 5 }
+            else if (b == 28) { lastInt32Pos = -1; pos += 3 }
+            else if (32 <= b && b <= 246) { lastInt32Pos = -1; pos += 1 }
+            else if (247 <= b && b <= 250) { lastInt32Pos = -1; pos += 2 }
+            else if (251 <= b && b <= 254) { lastInt32Pos = -1; pos += 2 }
+            else if (b == 12 && pos + 1 < dictEnd) { lastInt32Pos = -1; pos += 2 }
+            else if (b == 18) {
                 if (lastInt32Pos >= 0) {
                     let oldOff = readInt32BE(data, lastInt32Pos + 1)
                     writeInt32BE(data, lastInt32Pos + 1, oldOff - delta)
                 }
                 return
-            } else {
-                lastInt32Pos = -1
-                pos += 1
-            }
+            } else { lastInt32Pos = -1; pos += 1 }
         }
     }
 
-    // ===== CFF INDEX 导航工具 =====
-
-    /** 跳过一个 CFF INDEX，返回 INDEX 之后的位置 */
     private func skipIndex(pos: Int64): Int64 {
         if (pos + 2 > cff.size) { return pos }
         let count = Int64(readUInt16(pos))
@@ -318,18 +707,12 @@ public class CFFSubsetter {
         if (pos + 3 > cff.size) { return pos + 2 }
         let offsize = Int64(cff[pos + 2])
         if (offsize < 1 || offsize > 4) { return pos + 3 }
-        let offsetsStart = pos + 3
-        // 读取最后一个偏移（offsets[count]）确定数据大小
-        let lastOffPos = offsetsStart + count * offsize
+        let lastOffPos = pos + 3 + count * offsize
         if (lastOffPos + offsize > cff.size) { return pos + 3 }
         let lastOff = readOffsetFromCff(lastOffPos, offsize)
-        // 数据区起始 = offsetsStart + (count+1)*offsize
-        // 数据区大小 = lastOff - 1
-        let dataAreaStart = offsetsStart + (count + 1) * offsize
-        dataAreaStart + lastOff - 1
+        pos + 3 + (count + 1) * offsize + lastOff - 1
     }
 
-    /** 获取 INDEX 中第 idx 个条目的数据偏移（1-based 转为绝对偏移，相对于 cff 起始） */
     private func getIndexItemOffset(data: Array<UInt8>, idxPos: Int64, idx: Int64): Int64 {
         if (idxPos + 2 > data.size) { return -1 }
         let count = Int64(readUInt16FromArray(data, idxPos))
@@ -338,11 +721,9 @@ public class CFFSubsetter {
         if (offsize < 1 || offsize > 4) { return -1 }
         let offsetsStart = idxPos + 3
         let dataStart = offsetsStart + (count + 1) * offsize
-        let off = readOffsetFromArray(data, offsetsStart, offsize, idx)
-        dataStart + off - 1
+        dataStart + readOffsetFromArray(data, offsetsStart, offsize, idx) - 1
     }
 
-    /** 获取 INDEX 中第 idx 个条目的长度 */
     private func getIndexItemLength(data: Array<UInt8>, idxPos: Int64, idx: Int64): Int64 {
         if (idxPos + 2 > data.size) { return 0 }
         let count = Int64(readUInt16FromArray(data, idxPos))
@@ -350,12 +731,10 @@ public class CFFSubsetter {
         let offsize = Int64(data[idxPos + 2])
         if (offsize < 1 || offsize > 4) { return 0 }
         let offsetsStart = idxPos + 3
-        let off0 = readOffsetFromArray(data, offsetsStart, offsize, idx)
-        let off1 = readOffsetFromArray(data, offsetsStart, offsize, idx + 1)
-        off1 - off0
+        readOffsetFromArray(data, offsetsStart, offsize, idx + 1) -
+        readOffsetFromArray(data, offsetsStart, offsize, idx)
     }
 
-    /** 获取 cff 中 INDEX 的末端位置（INDEX 总字节数的结束位置） */
     private func getIndexEnd(data: Array<UInt8>, pos: Int64): Int64 {
         if (pos + 2 > data.size) { return pos }
         let count = Int64(readUInt16FromArray(data, pos))
@@ -363,64 +742,35 @@ public class CFFSubsetter {
         let offsize = Int64(data[pos + 2])
         if (offsize < 1 || offsize > 4) { return pos + 2 }
         let offsetsStart = pos + 3
-        let lastOffPos = offsetsStart + count * offsize
-        if (lastOffPos + offsize > data.size) { return pos + 3 }
-        let lastOff = readOffsetFromArray(data, offsetsStart, offsize, count)
-        let dataAreaStart = offsetsStart + (count + 1) * offsize
-        dataAreaStart + lastOff - 1
+        pos + 3 + (count + 1) * offsize + readOffsetFromArray(data, offsetsStart, offsize, count) - 1
     }
 
-    // ===== CFF Dict 解析工具 =====
-
-    /**
-     * 在 dict 中找到指定操作符的第一个操作数值（用于查询偏移）
-     * op2 = -1 表示单字节操作符
-     * 返回 -1 表示未找到
-     */
     private func findDictInt(data: Array<UInt8>, dictStart: Int64, dictLen: Int64,
                              op1: Int32, op2: Int32): Int64 {
         var pos = dictStart
         let dictEnd = dictStart + dictLen
         var stack = ArrayList<Int64>()
-
         while (pos < dictEnd) {
             let b = Int32(data[pos])
-            if (b == 29 && pos + 5 <= dictEnd) {
-                stack.add(readInt32BEFromArray(data, pos + 1))
-                pos += 5
-            } else if (b == 28 && pos + 3 <= dictEnd) {
-                stack.add(readInt16BEFromArray(data, pos + 1))
-                pos += 3
-            } else if (32 <= b && b <= 246) {
-                stack.add(Int64(b - 139))
-                pos += 1
-            } else if (247 <= b && b <= 250 && pos + 2 <= dictEnd) {
-                stack.add(Int64((b - 247) * 256 + Int32(data[pos + 1]) + 108))
-                pos += 2
-            } else if (251 <= b && b <= 254 && pos + 2 <= dictEnd) {
-                stack.add(Int64(-((b - 251) * 256 + Int32(data[pos + 1]) + 108)))
-                pos += 2
-            } else if (b == 12 && pos + 2 <= dictEnd) {
+            if (b == 29 && pos + 5 <= dictEnd) { stack.add(readInt32BEFromArray(data, pos + 1)); pos += 5 }
+            else if (b == 28 && pos + 3 <= dictEnd) { stack.add(readInt16BEFromArray(data, pos + 1)); pos += 3 }
+            else if (32 <= b && b <= 246) { stack.add(Int64(b - 139)); pos += 1 }
+            else if (247 <= b && b <= 250 && pos + 2 <= dictEnd) {
+                stack.add(Int64((b - 247) * 256 + Int32(data[pos + 1]) + 108)); pos += 2 }
+            else if (251 <= b && b <= 254 && pos + 2 <= dictEnd) {
+                stack.add(Int64(-((b - 251) * 256 + Int32(data[pos + 1]) + 108))); pos += 2 }
+            else if (b == 12 && pos + 2 <= dictEnd) {
                 let op2b = Int32(data[pos + 1])
-                if (b == op1 && op2b == op2 && stack.size > 0) {
-                    return stack[stack.size - 1]
-                }
-                stack = ArrayList<Int64>()
-                pos += 2
+                if (b == op1 && op2b == op2 && stack.size > 0) { return stack[stack.size - 1] }
+                stack = ArrayList<Int64>(); pos += 2
             } else {
-                if (b == op1 && op2 < 0 && stack.size > 0) {
-                    return stack[stack.size - 1]
-                }
-                stack = ArrayList<Int64>()
-                pos += 1
+                if (b == op1 && op2 < 0 && stack.size > 0) { return stack[stack.size - 1] }
+                stack = ArrayList<Int64>(); pos += 1
             }
         }
         -1
     }
 
-    // ===== INDEX 偏移读写 =====
-
-    /** 从 cff 中读取偏移表中第 i 个偏移值（1-based） */
     private func readOffset(offsetsStart: Int64, offsize: Int64, i: Int64): Int64 {
         readOffsetFromCff(offsetsStart + i * offsize, offsize)
     }
@@ -448,31 +798,21 @@ public class CFFSubsetter {
         }
     }
 
-    /** 写入 1-based 偏移值到输出数组 */
     private func writeOffsetBE(buf: Array<UInt8>, pos: Int64, offsize: Int64, value: Int64): Unit {
         match (offsize) {
-            case 1 =>
-                buf[pos] = UInt8(value & 0xFF)
-            case 2 =>
-                buf[pos]     = UInt8((value >> 8) & 0xFF)
-                buf[pos + 1] = UInt8(value & 0xFF)
+            case 1 => buf[pos] = UInt8(value & 0xFF)
+            case 2 => buf[pos] = UInt8((value >> 8) & 0xFF); buf[pos + 1] = UInt8(value & 0xFF)
             case 3 =>
-                buf[pos]     = UInt8((value >> 16) & 0xFF)
+                buf[pos] = UInt8((value >> 16) & 0xFF)
                 buf[pos + 1] = UInt8((value >> 8) & 0xFF)
                 buf[pos + 2] = UInt8(value & 0xFF)
             case _ =>
-                buf[pos]     = UInt8((value >> 24) & 0xFF)
-                buf[pos + 1] = UInt8((value >> 16) & 0xFF)
-                buf[pos + 2] = UInt8((value >> 8) & 0xFF)
-                buf[pos + 3] = UInt8(value & 0xFF)
+                buf[pos] = UInt8((value >> 24) & 0xFF); buf[pos + 1] = UInt8((value >> 16) & 0xFF)
+                buf[pos + 2] = UInt8((value >> 8) & 0xFF); buf[pos + 3] = UInt8(value & 0xFF)
         }
     }
 
-    // ===== 字节读写工具 =====
-
-    private func readUInt16(pos: Int64): UInt16 {
-        (UInt16(cff[pos]) << 8) | UInt16(cff[pos + 1])
-    }
+    private func readUInt16(pos: Int64): UInt16 { (UInt16(cff[pos]) << 8) | UInt16(cff[pos + 1]) }
 
     private func readUInt16FromArray(data: Array<UInt8>, pos: Int64): UInt16 {
         (UInt16(data[pos]) << 8) | UInt16(data[pos + 1])
@@ -484,9 +824,7 @@ public class CFFSubsetter {
         if (v >= 0x80000000) { v - 0x100000000 } else { v }
     }
 
-    private func readInt32BE(data: Array<UInt8>, pos: Int64): Int64 {
-        readInt32BEFromArray(data, pos)
-    }
+    private func readInt32BE(data: Array<UInt8>, pos: Int64): Int64 { readInt32BEFromArray(data, pos) }
 
     private func readInt16BEFromArray(data: Array<UInt8>, pos: Int64): Int64 {
         let v = (Int64(data[pos]) << 8) | Int64(data[pos + 1])
@@ -495,10 +833,8 @@ public class CFFSubsetter {
 
     private func writeInt32BE(buf: Array<UInt8>, pos: Int64, value: Int64): Unit {
         let v = UInt64(value) & 0xFFFFFFFFu64
-        buf[pos]     = UInt8((v >> 24) & 0xFF)
-        buf[pos + 1] = UInt8((v >> 16) & 0xFF)
-        buf[pos + 2] = UInt8((v >> 8) & 0xFF)
-        buf[pos + 3] = UInt8(v & 0xFF)
+        buf[pos] = UInt8((v >> 24) & 0xFF); buf[pos + 1] = UInt8((v >> 16) & 0xFF)
+        buf[pos + 2] = UInt8((v >> 8) & 0xFF); buf[pos + 3] = UInt8(v & 0xFF)
     }
 
     private func copyRange(data: Array<UInt8>, start: Int64, end: Int64): Array<UInt8> {
