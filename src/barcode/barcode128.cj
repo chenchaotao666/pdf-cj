@@ -159,6 +159,12 @@ public class Barcode128 {
      * 创建流式布局图片（像素级渲染，不写入 cb），用于 doc.add(img)
      */
     public func createFlowImage(barColor: Color): Image {
+        createFlowImage(barColor, Color(0, 0, 0))
+    }
+
+    // textColor 参数与 Java createImageWithBarcode(cb, barColor, textColor) 对齐；
+    // 当前实现为纯位图，文字颜色暂用 barColor 表示条颜色
+    public func createFlowImage(barColor: Color, _textColor: Color): Image {
         let symbols = encode()
         let bars = symbolsToBars(symbols)
         var totalMods: Int32 = 0

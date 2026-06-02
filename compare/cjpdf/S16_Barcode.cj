@@ -1,16 +1,13 @@
 package pdf_cj_examples
 
-import pdf_cj.api.{Document, Paragraph, Phrase, Chunk}
-import pdf_cj.core.{PdfWriter, PdfContentByte}
-import pdf_cj.barcode.{Barcode128, BarcodeEAN, Barcode39, BarcodePDF417}
-import pdf_cj.text.{BaseFont, Font, FontStyle, Color, Alignment}
-import pdf_cj.util.{PageSize, Rectangle}
+import pdf_cj.api.{Document, Paragraph}
+import pdf_cj.core.PdfWriter
+import pdf_cj.barcode.{Barcode128, BarcodeEAN, Barcode39, BarcodePDF417, BarcodeDatamatrix}
+import pdf_cj.text.{Font, FontStyle, Color, Alignment}
+import pdf_cj.util.PageSize
 import std.fs.{File, OpenMode, Path}
 
-let _s16_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
-let _s16_OUT  = "output/"
-
-
+let _s16_OUT = "output/"
 
 func s16_barcode(): Unit {
     println("S16: Barcode Demo")
@@ -27,20 +24,36 @@ func s16_barcode(): Unit {
         title.setSpacingAfter(20.0)
         doc.add(title)
 
-        // 1. DataMatrix (not available in pdf-cj)
-        doc.add(Paragraph("1. DataMatrix Barcode (BarcodeDatamatrix):", Font(helvBf, 12.0)))
-        doc.add(Paragraph("1. DataMatrix error: BarcodeDatamatrix not available in pdf-cj", Font(helvBf, 10.0)))
+        // 1. DataMatrix
+        try {
+            doc.add(Paragraph("1. DataMatrix Barcode (BarcodeDatamatrix):", Font(helvBf, 12.0)))
+            let dm = BarcodeDatamatrix()
+            dm.generate("pdf-cj 0.1.0")
+            let dmImg = dm.createImage()
+            dmImg.scaleAbsolute(100.0, 100.0)
+            dmImg.setAlignment(Alignment.Left)
+            dmImg.setSpacingBefore(4.0)
+            dmImg.setSpacingAfter(10.0)
+            doc.add(dmImg)
+        } catch (e: Exception) {
+            doc.add(Paragraph("1. DataMatrix error: ${e.message}", Font(helvBf, 10.0)))
+        }
 
         // 2. Code-128
         try {
             doc.add(Paragraph("2. Code-128:", Font(helvBf, 12.0)))
-            let code128 = Barcode128("OpenPDF-2.0.3")
+            let code128 = Barcode128("pdf-cj-0.1.0")
             code128.barHeight = 40.0
+            code128.moduleWidth = 0.8
             let img = code128.createFlowImage(Color(0, 0, 0))
             img.setAlignment(Alignment.Left)
             img.setSpacingBefore(4.0)
-            img.setSpacingAfter(10.0)
+            img.setSpacingAfter(2.0)
             doc.add(img)
+            let lbl2 = Paragraph("pdf-cj-0.1.0", Font(helvBf, 8.0))
+            lbl2.setAlignment(Alignment.Left)
+            lbl2.setSpacingAfter(10.0)
+            doc.add(lbl2)
         } catch (e: Exception) {
             doc.add(Paragraph("2. Code-128 error: ${e.message}", Font(helvBf, 10.0)))
         }
@@ -48,13 +61,18 @@ func s16_barcode(): Unit {
         // 3. Code-39
         try {
             doc.add(Paragraph("3. Code-39:", Font(helvBf, 12.0)))
-            let code39 = Barcode39("OPENPDF")
+            let code39 = Barcode39("PDF-CJ")
             code39.barHeight = 40.0
+            code39.moduleWidth = 0.8
             let img = code39.createFlowImage(Color(0, 0, 0))
             img.setAlignment(Alignment.Left)
             img.setSpacingBefore(4.0)
-            img.setSpacingAfter(10.0)
+            img.setSpacingAfter(2.0)
             doc.add(img)
+            let lbl3 = Paragraph("*PDF-CJ*", Font(helvBf, 8.0))
+            lbl3.setAlignment(Alignment.Left)
+            lbl3.setSpacingAfter(10.0)
+            doc.add(lbl3)
         } catch (e: Exception) {
             doc.add(Paragraph("3. Code-39 error: ${e.message}", Font(helvBf, 10.0)))
         }
@@ -67,8 +85,12 @@ func s16_barcode(): Unit {
             let img = ean.createFlowImage(Color(0, 0, 0))
             img.setAlignment(Alignment.Left)
             img.setSpacingBefore(4.0)
-            img.setSpacingAfter(10.0)
+            img.setSpacingAfter(2.0)
             doc.add(img)
+            let lbl4 = Paragraph("9781234567897", Font(helvBf, 8.0))
+            lbl4.setAlignment(Alignment.Left)
+            lbl4.setSpacingAfter(10.0)
+            doc.add(lbl4)
         } catch (e: Exception) {
             doc.add(Paragraph("4. EAN-13 error: ${e.message}", Font(helvBf, 10.0)))
         }
@@ -82,8 +104,12 @@ func s16_barcode(): Unit {
             let img = ean8.createFlowImage(Color(0, 0, 0))
             img.setAlignment(Alignment.Left)
             img.setSpacingBefore(4.0)
-            img.setSpacingAfter(10.0)
+            img.setSpacingAfter(2.0)
             doc.add(img)
+            let lbl5 = Paragraph("12345670", Font(helvBf, 8.0))
+            lbl5.setAlignment(Alignment.Left)
+            lbl5.setSpacingAfter(10.0)
+            doc.add(lbl5)
         } catch (e: Exception) {
             doc.add(Paragraph("5. EAN-8 error: ${e.message}", Font(helvBf, 10.0)))
         }
@@ -91,7 +117,7 @@ func s16_barcode(): Unit {
         // 6. PDF417
         try {
             doc.add(Paragraph("6. PDF417:", Font(helvBf, 12.0)))
-            let pdf417 = BarcodePDF417("OpenPDF 2.0.3 PDF417 barcode demonstration")
+            let pdf417 = BarcodePDF417("pdf-cj 0.1.0 PDF417 barcode demonstration")
             let img = pdf417.createFlowImage(Color(0, 0, 0), 300.0, 80.0)
             img.setAlignment(Alignment.Left)
             img.setSpacingBefore(4.0)
@@ -106,25 +132,36 @@ func s16_barcode(): Unit {
             doc.add(Paragraph("7. Code-128 with custom colors (blue bars, red text):", Font(helvBf, 12.0)))
             let colorBarcode = Barcode128("COLOR-DEMO")
             colorBarcode.barHeight = 40.0
-            let img = colorBarcode.createFlowImage(Color(0, 0, 255))
+            colorBarcode.moduleWidth = 0.8
+            let img = colorBarcode.createFlowImage(Color(0, 0, 255), Color(255, 0, 0))
             img.setAlignment(Alignment.Left)
             img.setSpacingBefore(4.0)
-            img.setSpacingAfter(10.0)
+            img.setSpacingAfter(2.0)
             doc.add(img)
+            let lbl7 = Paragraph("COLOR-DEMO", Font(helvBf, 8.0))
+            lbl7.setAlignment(Alignment.Left)
+            lbl7.setSpacingAfter(10.0)
+            doc.add(lbl7)
         } catch (e: Exception) {
             doc.add(Paragraph("7. Colored barcode error: ${e.message}", Font(helvBf, 10.0)))
         }
 
-        // 8. UPC-A (approximated as EAN-13 with leading 0)
+        // 8. UPC-A — page 2 (matches Java layout)
+        doc.newPage()
+        // (encoded as EAN-13 with leading 0: "0" + "012345678905" → "0012345678905")
         try {
             doc.add(Paragraph("8. UPC-A:", Font(helvBf, 12.0)))
-            let upca = BarcodeEAN("001234567890")
+            let upca = BarcodeEAN("0012345678905")
             upca.barHeight = 60.0
             let img = upca.createFlowImage(Color(0, 0, 0))
             img.setAlignment(Alignment.Left)
             img.setSpacingBefore(4.0)
-            img.setSpacingAfter(10.0)
+            img.setSpacingAfter(2.0)
             doc.add(img)
+            let lbl8 = Paragraph("0012345678905", Font(helvBf, 8.0))
+            lbl8.setAlignment(Alignment.Left)
+            lbl8.setSpacingAfter(10.0)
+            doc.add(lbl8)
         } catch (e: Exception) {
             doc.add(Paragraph("8. UPC-A error: ${e.message}", Font(helvBf, 10.0)))
         }
