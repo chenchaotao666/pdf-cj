@@ -191,22 +191,21 @@ public class CFFSubsetter {
             let (privOff, privSize, subrsRel) = fdInfos[fi]
             let isFDUsed = usedFDs.contains(Int32(fi))
 
-            // 新 PrivateDict
+            // 是否需要为该 FD 输出 LocalSubrs：FD 被使用且原本有 Subrs
+            let emitSubrs = isFDUsed && subrsRel >= 0
+
+            // 新 PrivateDict（删除旧 Subrs 条目，按需追加新 Subrs 偏移）
             var newPriv: Array<UInt8>
             if (privOff > 0 && privSize > 0 && privOff + privSize <= cff.size) {
                 let origPriv = copyRange(cff, privOff, privOff + privSize)
-                newPriv = if (subrsRel >= 0) {
-                    patchPrivateDictSubrs(origPriv, privSize, !isFDUsed)
-                } else {
-                    origPriv
-                }
+                newPriv = buildPrivateDict(origPriv, emitSubrs)
             } else {
                 newPriv = Array<UInt8>(0, repeat: UInt8(0))
             }
 
-            // 新 LocalSubrs
+            // 新 LocalSubrs（紧跟 Private DICT，偏移 = newPriv.size）
             var newSubrs: Array<UInt8>
-            if (subrsRel >= 0 && isFDUsed) {
+            if (emitSubrs) {
                 let subrsAbs = privOff + subrsRel
                 if (subrsAbs > 0 && subrsAbs < cff.size) {
                     let subrsEnd = getIndexEnd(cff, subrsAbs)
@@ -221,19 +220,17 @@ public class CFFSubsetter {
                 } else {
                     newSubrs = emptyIndex()
                 }
-            } else if (subrsRel >= 0) {
-                newSubrs = emptyIndex()
             } else {
                 newSubrs = Array<UInt8>(0, repeat: UInt8(0))
             }
             fdPieces.add((newPriv, newSubrs))
         }
 
-        // 计算 FDArray INDEX 大小
+        // 计算 FDArray INDEX 大小（privSize 操作数用新 Private DICT 大小）
         var fdDictDataSize: Int64 = 0
         for (fi in 0..fdCount) {
-            let (privOff, privSize, _) = fdInfos[fi]
-            let pse = if (privOff > 0 && privSize > 0) { cffIntSize(privSize) } else { 1 }
+            let (newPriv, _) = fdPieces[fi]
+            let pse = if (newPriv.size > 0) { cffIntSize(Int64(newPriv.size)) } else { 1 }
             fdDictDataSize += pse + 5 + 1
         }
         let fdIdxOffsize: Int64 = if (fdDictDataSize + 1 <= 255) { 1 }
@@ -265,9 +262,9 @@ public class CFFSubsetter {
         fd1Based.add(1i64)
         let fdDictDataStart = wp
         for (fi in 0..fdCount) {
-            let (privOff, privSize, _) = fdInfos[fi]
+            let (newPriv, _) = fdPieces[fi]
             let privAbsOff = newPrivAbsOffs[fi]
-            let psBytes = encodeCFFInt(if (privOff > 0 && privSize > 0) { privSize } else { 0i64 })
+            let psBytes = encodeCFFInt(Int64(newPriv.size))
             for (b in 0..psBytes.size) { out[wp] = psBytes[b]; wp += 1 }
             let v = UInt64(privAbsOff) & 0xFFFFFFFFu64
             out[wp] = 29u8; wp += 1
@@ -342,23 +339,32 @@ public class CFFSubsetter {
             let abs1 = csDataStart + o1 - 1
             let len  = o2 - o1
             if (abs1 >= 0 && abs1 + len <= cff.size && len > 0) {
-                collectCalledSubrs(abs1, len, subrPieces, bias, needed, 0i32)
+                collectCalledSubrs(abs1, len, subrPieces, bias, needed, 0i32, 0i32)
             }
         }
         needed
     }
 
-    // 解析 Type 2 charstring，递归收集被调用的 Local Subrs 索引
+    /**
+     * 解析 Type 2 charstring，递归收集被调用的 Local Subrs 索引。
+     * 返回更新后的 hint 数量（供上层继续解析时使用）。
+     *
+     * 关键：必须正确处理 hintmask(19) / cntrmask(20)——
+     * 这两个操作符后面跟着 ceil(numHints/8) 字节的 mask 数据，
+     * 不能当作普通操作数解析，否则会漏掉真正的 callsubr。
+     */
     private func collectCalledSubrs(
         dataAbs: Int64, dataLen: Int64,
         subrPieces: ArrayList<(Int64, Int64)>,
         bias: Int64,
         needed: HashMap<Int64, Bool>,
-        depth: Int32
-    ): Unit {
-        if (depth > 10 || dataLen <= 0) { return }
+        depth: Int32,
+        numHintsIn: Int32
+    ): Int32 {
+        if (depth > 10 || dataLen <= 0) { return numHintsIn }
         var i: Int64 = 0
         var stack = ArrayList<Int64>()
+        var numHints: Int32 = numHintsIn
 
         while (i < dataLen) {
             let bPos = dataAbs + i
@@ -366,7 +372,7 @@ public class CFFSubsetter {
             let b = Int32(cff[bPos])
 
             if (b == 10) {
-                // callsubr: 弹出栈顶，加偏置 = 子程序索引
+                // callsubr：弹出栈顶 + 偏置 = 子程序索引
                 if (stack.size > 0) {
                     let biasedIdx = stack[stack.size - 1]
                     stack.remove((stack.size - 1)..stack.size)
@@ -376,7 +382,8 @@ public class CFFSubsetter {
                             needed[actualIdx] = true
                             let (sAbs, sLen) = subrPieces[Int64(actualIdx)]
                             if (sAbs >= 0 && sLen > 0) {
-                                collectCalledSubrs(sAbs, sLen, subrPieces, bias, needed, depth + 1)
+                                numHints = collectCalledSubrs(sAbs, sLen, subrPieces, bias,
+                                                             needed, depth + 1, numHints)
                             }
                         }
                     }
@@ -384,6 +391,23 @@ public class CFFSubsetter {
                 i += 1
             } else if (b == 11 || b == 14) {
                 break  // return / endchar
+            } else if (b == 1 || b == 3) {
+                // hstem / vstem：每对操作数 = 1 条 hint
+                numHints += Int32(stack.size) / 2
+                stack = ArrayList<Int64>()
+                i += 1
+            } else if (b == 18 || b == 23) {
+                // hstemhm / vstemhm：同上
+                numHints += Int32(stack.size) / 2
+                stack = ArrayList<Int64>()
+                i += 1
+            } else if (b == 19 || b == 20) {
+                // hintmask / cntrmask：栈里残留的操作数视为隐式 vstemhm
+                numHints += Int32(stack.size) / 2
+                stack = ArrayList<Int64>()
+                // 跳过 ceil(numHints/8) 字节的 mask 数据
+                let maskBytes = Int64((numHints + 7) / 8)
+                i += 1 + maskBytes
             } else if (b == 29) {
                 // callgsubr：不追踪全局子程序，只弹栈
                 if (stack.size > 0) { stack.remove((stack.size - 1)..stack.size) }
@@ -395,7 +419,7 @@ public class CFFSubsetter {
                 }
                 i += 3
             } else if (b == 255) {
-                // 4 字节定点数（非整数）
+                // 4 字节定点数（charstring 专用，非整数）
                 i += 5
             } else if (32 <= b && b <= 246) {
                 stack.add(Int64(b - 139)); i += 1
@@ -410,15 +434,16 @@ public class CFFSubsetter {
                 }
                 i += 2
             } else if (b == 12) {
-                // escape 操作符（2 字节），清空栈
+                // escape 操作符（2 字节）
                 stack = ArrayList<Int64>()
                 i += 2
             } else {
-                // 其他操作符，清空栈
+                // 其他单字节操作符
                 stack = ArrayList<Int64>()
                 i += 1
             }
         }
+        numHints
     }
 
     // 重建 Local Subrs INDEX，未使用条目替换为单字节 return(0x0B)
@@ -477,38 +502,68 @@ public class CFFSubsetter {
 
     // ===== Private DICT 修改 =====
 
-    private func patchPrivateDictSubrs(
-        origBytes: Array<UInt8>, newSubrsOff: Int64, remove: Bool
-    ): Array<UInt8> {
-        let result = Array<UInt8>(origBytes.size, repeat: UInt8(0))
-        for (i in 0..origBytes.size) { result[i] = origBytes[i] }
+    /**
+     * 重建 Private DICT：复制除 Subrs(19) 外的所有 operand-operator 条目，
+     * 若 emitSubrs 则在末尾追加一个新的 Subrs 条目，偏移 = 新 Private DICT 大小
+     *（使 LocalSubrs 紧跟其后）。偏移用固定 3 字节 int16(op 28) 编码，避免循环依赖。
+     *
+     * 关键：CFF DICT 中操作数必须紧邻其操作符，不能用哑整数填充残留在栈上，
+     * 否则阅读器解析 Private DICT 时会因 "non-empty stack" 报错。
+     */
+    private func buildPrivateDict(origPriv: Array<UInt8>, emitSubrs: Bool): Array<UInt8> {
+        var kept = ArrayList<UInt8>()
         var pos: Int64 = 0
-        var lastOpStart: Int64 = -1
-        while (pos < origBytes.size) {
-            let b = Int32(origBytes[pos])
-            if (b == 29) { lastOpStart = pos; pos += 5 }
-            else if (b == 28) { lastOpStart = pos; pos += 3 }
-            else if (32 <= b && b <= 246) { lastOpStart = pos; pos += 1 }
-            else if (247 <= b && b <= 254) { lastOpStart = pos; pos += 2 }
-            else if (b == 12) { lastOpStart = -1; pos += 2 }
-            else {
-                if (b == 19 && lastOpStart >= 0) {
-                    let rangeStart = lastOpStart
-                    let rangeEnd   = pos + 1
-                    let rangeLen   = rangeEnd - rangeStart
-                    if (remove) {
-                        for (j in rangeStart..rangeEnd) { result[j] = 140u8 }
-                    } else {
-                        let padLen = rangeLen - 2
-                        for (j in rangeStart..(rangeStart + padLen)) { result[j] = 140u8 }
-                        result[rangeStart + padLen]     = UInt8(newSubrsOff + 139)
-                        result[rangeStart + padLen + 1] = 19u8
-                    }
-                    return result
+        var opStart: Int64 = 0   // 当前 operand 序列起点
+
+        while (pos < origPriv.size) {
+            let b = Int32(origPriv[pos])
+            if (b == 28) { pos += 3 }            // int16 operand
+            else if (b == 29) { pos += 5 }       // int32 operand
+            else if (b == 30) {                  // real number operand（nibble 流）
+                pos += 1
+                var done = false
+                while (pos < origPriv.size && !done) {
+                    let nib = Int32(origPriv[pos]); pos += 1
+                    if ((nib & 0x0F) == 0x0F || (nib & 0xF0) == 0xF0) { done = true }
                 }
-                lastOpStart = -1; pos += 1
+            }
+            else if (32 <= b && b <= 246) { pos += 1 }       // 1 字节整数
+            else if (247 <= b && b <= 254) { pos += 2 }      // 2 字节整数
+            else if (b == 12) {
+                // 2 字节操作符：复制整段 operand+operator
+                for (j in opStart..(pos + 2)) { kept.add(origPriv[j]) }
+                pos += 2
+                opStart = pos
+            }
+            else {
+                // 1 字节操作符
+                if (b == 19) {
+                    // Subrs：丢弃此条目（不复制）
+                    pos += 1
+                    opStart = pos
+                } else {
+                    for (j in opStart..(pos + 1)) { kept.add(origPriv[j]) }
+                    pos += 1
+                    opStart = pos
+                }
             }
         }
+
+        if (!emitSubrs) {
+            let r = Array<UInt8>(kept.size, repeat: UInt8(0))
+            for (i in 0..kept.size) { r[i] = kept[i] }
+            return r
+        }
+
+        // 追加新 Subrs 条目：偏移 = 新 Private DICT 大小（base + 4）
+        let base = kept.size
+        let newSize = base + 4
+        let result = Array<UInt8>(newSize, repeat: UInt8(0))
+        for (i in 0..base) { result[i] = kept[i] }
+        result[base]     = 28u8                              // int16 operand
+        result[base + 1] = UInt8((newSize >> 8) & 0xFF)
+        result[base + 2] = UInt8(newSize & 0xFF)
+        result[base + 3] = 19u8                              // Subrs 操作符
         result
     }
 
@@ -519,11 +574,10 @@ public class CFFSubsetter {
         if (originalCount == 0) { return emptyIndex() }
         let offsize = Int64(cff[csOff + 2])
         if (offsize < 1 || offsize > 4) { return emptyIndex() }
-        var maxGlyph: Int64 = 0
-        for ((gid, _) in usedGlyphs) {
-            if (Int64(gid) > maxGlyph) { maxGlyph = Int64(gid) }
-        }
-        let count = if (maxGlyph + 1 < originalCount) { maxGlyph + 1 } else { originalCount }
+        // 必须保持 numGlyphs 不变：charset 和 FDSelect（在 part1 中完整保留）
+        // 都是按原始字形数编码的。裁剪 count 会破坏三者一致性，导致字体无法解析。
+        // 未用字形替换为单字节 endchar(0x0E)，offset 表略大但数据区极小。
+        let count = originalCount
         let offsetsStart = csOff + 3
         let dataStart    = offsetsStart + (originalCount + 1) * offsize
         let endchar = Array<UInt8>(1, repeat: 14u8)
