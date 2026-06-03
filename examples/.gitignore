@@ -1,0 +1,20 @@
+# 本地配置（由 build.sh 生成，含本地绝对路径）
+cjpm.toml
+cjpm.lock
+
+# 构建输出
+target/
+build/
+*.cjo
+*.a
+*.so
+
+# 生成的 PDF
+output/
+*.pdf
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

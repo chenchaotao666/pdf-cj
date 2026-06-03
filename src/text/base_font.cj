@@ -5,6 +5,7 @@
 package pdf_cj.text
 
 import pdf_cj.util.PdfException
+import std.collection.HashMap
 
 /**
  * 基础字体类
@@ -18,6 +19,11 @@ public class BaseFont {
     private var ttfFont: ?TrueTypeFont = None  // TrueType 字体对象
     private var fontSubset: ?FontSubsetting = None  // 字体子集化对象（用于嵌入字体）
     private var _subsetFontName: ?String = None  // 子集字体名称（6字符前缀+字体名）
+
+    // 按路径缓存已加载的 TrueTypeFont（原始字体数据只读，可跨 BaseFont 共享）。
+    // 避免同一字体（如 19MB 的 NotoSansCJK）被反复加载导致内存暴涨/OOM。
+    // 子集状态（usedGlyphs）保存在各 BaseFont 独立的 FontSubsetting 中，不受共享影响。
+    private static let _ttfCache = HashMap<String, TrueTypeFont>()
 
     // 标准 14 字体名称
     public static let COURIER = "Courier"
@@ -188,7 +194,14 @@ public class BaseFont {
      */
     private func loadTrueTypeFont(path: String): Unit {
         try {
-            let font = TrueTypeFont(path)
+            // 优先复用缓存中的字体数据，避免重复加载大字体文件
+            let font = match (_ttfCache.get(path)) {
+                case Some(cached) => cached
+                case None =>
+                    let f = TrueTypeFont(path)
+                    _ttfCache[path] = f
+                    f
+            }
             ttfFont = Some(font)
 
             // 如果需要嵌入字体，创建子集化对象并生成子集前缀

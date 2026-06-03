@@ -1,206 +1,95 @@
-# PDF-CJ 示例程序
+# pdf-cj 仓颉语言示例
 
-本目录包含 PDF-CJ 库的示例程序，展示各种功能的使用方法。
+基于 pdf-cj 项目的 23 个功能模块示例（`src/S01`–`src/S23`），与 `openpdf-examples/`
+下的 OpenPDF Java 示例一一对应。本目录是一个独立的 cjpm 可执行项目，通过
+`pdf_cj = { path = ".." }` 依赖上层库。
 
-## 📁 示例列表
-
-### 1. hello_world.cj
-**入门示例** - 最简单的 PDF 创建流程
-
-展示内容：
-- 创建基本 PDF 文档
-- 添加标题和段落
-- 设置字体和对齐方式
+## 运行方式
 
 ```bash
-cjpm run hello_world
+# 1. 首次：生成 cjpm.toml（自动检测 HiTLS 路径）并构建
+cd examples
+./build.sh
+# 或指定 HiTLS 路径： HITLS_LIB=/your/path ./build.sh
+
+# 2. 运行
+cjpm run                       # 运行全部 23 个模块（默认）
+cjpm run --run-args "all"      # 运行全部
+cjpm run --run-args "7"        # 只运行 S07
+cjpm run --run-args "07"       # 同上
 ```
 
-### 2. example_comprehensive.cj
-**综合示例** - 展示所有核心功能
+> 若已有正确的 `cjpm.toml`（含 HiTLS 路径），也可直接 `cjpm build` / `cjpm run`，无需 `build.sh`。
 
-展示内容：
-- ✅ 文本和段落处理
-- ✅ 多种字体和样式
-- ✅ 表格创建（简单和复杂）
-- ✅ 图片支持（多种缩放方式）
-- ✅ 编码和压缩（Flate、ASCIIHex、ASCII85）
-- ✅ 页眉和页脚
-- ✅ 文档元数据
-- ✅ 高级格式控制
-
-```bash
-cjpm run example_comprehensive
-```
-
-### 3. example_table.cj
-**表格专题示例** - 深入展示表格功能
-
-展示内容：
-- 基础表格创建
-- 表格样式（背景色、边框、内边距）
-- 跨行跨列
-- 嵌套内容（在单元格中添加段落）
-- 交替行颜色
-- 合计行
-
-```bash
-cjpm run example_table
-```
-
-## 🚀 运行示例
-
-### 前置条件
-
-确保已经构建了 pdf-cj 库：
-
-```bash
-# 在项目根目录下
-cd pdf-cj
-cjpm build
-```
-
-### 方法 1：使用运行脚本（推荐）
-
-项目提供了便捷的运行脚本：
-
-```bash
-# 运行 hello_world 示例
-./run_example.sh hello_world
-
-# 运行表格示例
-./run_example.sh example_table
-
-# 运行综合示例
-./run_example.sh example_comprehensive
-```
-
-### 方法 2：手动编译运行
-
-```bash
-# 编译并运行 hello_world
-cjc --import-path target/release/pdf_cj examples/hello_world.cj \
-    target/release/pdf_cj/libpdf_cj*.a -o hello_world
-./hello_world
-
-# 或者使用更简洁的方式（链接所有库）
-cjc --import-path target/release/pdf_cj examples/hello_world.cj \
-    target/release/pdf_cj/*.a -o hello_world && ./hello_world
-```
-
-## 📖 示例说明
-
-### 基本使用流程
-
-所有示例都遵循以下基本流程：
-
-```cangjie
-// 1. 导入库
-import std.io.FileOutputStream
-import pdf_cj.*
-
-main() {
-    // 2. 创建输出流
-    let output = FileOutputStream("output.pdf")
-    
-    // 3. 创建文档
-    let document = Document()
-    
-    // 4. 获取写入器
-    let writer = PdfWriter.getInstance(document, output)
-    
-    // 5. 打开文档
-    document.open()
-    
-    // 6. 添加内容
-    document.add(Paragraph("Hello World"))
-    
-    // 7. 关闭文档
-    document.close()
-    output.close()
-}
-```
-
-### 常用代码片段
-
-#### 创建带样式的段落
-
-```cangjie
-let font = Font(FontFamily.Helvetica, 14.0, FontStyle.Bold)
-let para = Paragraph("标题文本", font)
-para.setAlignment(Alignment.Center)
-para.setSpacingAfter(20.0)
-document.add(para)
-```
-
-#### 创建简单表格
-
-```cangjie
-let table = PdfPTable(3)  // 3列
-table.setWidthPercentage(100.0)
-
-// 添加表头
-for (header in ["列1", "列2", "列3"]) {
-    table.addCell(header)
-}
-
-// 添加数据
-for (data in ["值1", "值2", "值3"]) {
-    table.addCell(data)
-}
-
-document.add(table)
-```
-
-#### 创建带样式的单元格
-
-```cangjie
-let cell = PdfPCell(Phrase("内容", font))
-cell.setHorizontalAlignment(Alignment.Center)
-cell.setBackgroundColor(Color(200, 200, 200))
-cell.setPadding(10.0)
-cell.setBorderWidth(2.0)
-table.addCell(cell)
-```
-
-#### 设置页眉页脚
-
-```cangjie
-let headerPhrase = Phrase("文档标题", headerFont)
-let header = HeaderFooter(headerPhrase, false)
-document.setHeader(header)
-
-let footerPhrase = Phrase("第 ", footerFont)
-let footer = HeaderFooter(footerPhrase, true)  // true 显示页码
-document.setFooter(footer)
-```
-
-## 🎯 学习路径
-
-1. **初学者**：从 `hello_world.cj` 开始，了解基本流程
-2. **进阶**：阅读 `example_table.cj`，学习表格创建
-3. **全面掌握**：研究 `example_comprehensive.cj`，了解所有功能
-
-## 📚 更多资源
-
-- [API 文档](../DESIGN.md) - 查看完整的 API 设计
-- [项目主页](../README.md) - 了解项目概况
-- [贡献指南](../CONTRIBUTING.md) - 如何为项目做贡献
-
-## ⚠️ 注意事项
-
-1. **图片文件**：图片相关示例需要实际的图片文件（.jpg、.png 等）
-2. **字体支持**：当前版本使用内置字体，未来将支持自定义字体
-3. **输出目录**：生成的 PDF 文件位于项目根目录
-
-## 🐛 问题反馈
-
-如果运行示例时遇到问题，请：
-1. 检查 cjpm 版本是否最新
-2. 确保项目已正确编译（`cjpm build`）
-3. 查看错误信息并参考文档
-4. 在 GitHub 提交 Issue
+输出目录：`examples/output/`　图片资源：`examples/images/`
 
 ---
 
-**Happy Coding with PDF-CJ! 🎉**
+## 文件列表
+
+| 文件 | 对应模块 | 输出 PDF |
+|------|---------|---------|
+| `S01_DocumentPage.cj` | 文档与页面控制 | `cj_s01_document_page.pdf` |
+| `S02_FontText.cj` | 字体与文本 | `cj_s02_font_text.pdf` |
+| `S03_Chunk.cj` | Chunk 文本块 | `cj_s03_chunk.pdf` |
+| `S04_Phrase.cj` | Phrase 短语 | `cj_s04_phrase.pdf` |
+| `S05_Paragraph.cj` | Paragraph 段落 | `cj_s05_paragraph.pdf` |
+| `S06_Anchor.cj` | Anchor 超链接 | `cj_s06_anchor.pdf` |
+| `S07_Table.cj` | PdfPTable / PdfPCell 表格 | `cj_s07_table.pdf` |
+| `S08_Image.cj` | Image 图片 | `cj_s08_image.pdf` |
+| `S09_Drawing.cj` | PdfContentByte 底层绘图 | `cj_s09_drawing.pdf` |
+| `S10_PageEvent.cj` | PageEvent 页面事件 | `cj_s10_pageevent.pdf` |
+| `S11_Bookmark.cj` | Bookmark / Outline 书签 | `cj_s11_bookmark.pdf` |
+| `S12_Annotation.cj` | Annotation 注释 | `cj_s12_annotation.pdf` |
+| `S13_FormField.cj` | AcroForm / FormField 表单 | `cj_s13_formfield.pdf` |
+| `S14_Transparency.cj` | 透明度与混合模式 | `cj_s14_transparency.pdf` |
+| `S15_Shading.cj` | Shading 渐变 | `cj_s15_shading.pdf` |
+| `S16_Barcode.cj` | Barcode 条形码 | `cj_s16_barcode.pdf` |
+| `S17_ReaderStamper.cj` | PdfReader / PdfStamper 读取修改 | `cj_s17_reader_stamper.pdf`<br>`cj_s17_form_filled.pdf` |
+| `S18_PdfCopy.cj` | PdfCopy PDF 合并复制 | `cj_s18_copy_merged.pdf`<br>`cj_s18_selected_pages.pdf`<br>`cj_s18_smart_copy.pdf` |
+| `S19_TextExtract.cj` | TextExtractor 文本提取 | `cj_s19_text_extract.pdf` |
+| `S20_Security.cj` | Security 加密与权限 | `cj_s20_encrypted_aes128.pdf`<br>`cj_s20_encrypted_aes256.pdf` |
+| `S21_ColumnText.cj` | ColumnText 多列排版 | `cj_s21_column_text.pdf` |
+| `S22_Chapter.cj` | Chapter / Section 章节 | `cj_s22_chapter.pdf` |
+| `S23_Metadata.cj` | 元数据与版本 | `cj_s23_metadata.pdf` |
+| `main.cj` | 入口调度器（all / 编号） | 所有上述 PDF |
+| `SharedFonts.cj` | 共享字体工厂（内部依赖） | — |
+
+> 以上 `.cj` 源文件均位于 `src/` 目录下。
+
+---
+
+## pdf-cj vs OpenPDF API 差异速查
+
+| Java (OpenPDF) | 仓颉 (pdf-cj) | 说明 |
+|----------------|--------------|------|
+| `doc.getPageSize()` | `doc.pageSize` | 仓颉用属性语法，无括号 |
+| `doc.leftMargin()` | `doc.leftMargin` | 同上，所有 margin getter |
+| `new Font(bf, size, Font.BOLD)` | `Font(bf, size, FontStyle.Bold)` | 枚举值不同 |
+| `new Color(r, g, b)` | `Color(r, g, b)` 或 `Color.RED` | 同名，用法相同 |
+| `setCMYKColorFill(c,m,y,k)` (float 0.0–1.0) | `setCMYKColorFill(c,m,y,k)` (Float32 0.0–1.0) | OpenPDF 2.x 改为 int；pdf-cj 保持 float |
+| `implements PdfPageEventHelper` (匿名类) | 命名类 `extends PdfPageEventHelper` | 仓颉不支持匿名内部类 |
+| `Chunk.setStrikethrough(true)` | `chunk.setStrikethrough(true)` | pdf-cj 支持 |
+| `BarcodeQRCode` | `BarcodeQRCode` | pdf-cj 支持二维码 |
+| `writer.setEncryption(AES_256, ...)` | `writer.setEncryption(...)` | pdf-cj 支持 AES-256 |
+| `PdfTextExtractor.getTextFromPage(...)` | `PdfReader.getTextFromPage(...)` | pdf-cj 内置文本提取 |
+
+---
+
+## 编译注意事项
+
+| 问题 | 处理方式 |
+|------|---------|
+| 多文件同包时模块级 `let` 命名冲突 | 使用 `_sXX_` 前缀，或将变量声明在函数体内 |
+| 反复加载 CJK 大字体导致 OOM | pdf-cj 的 `BaseFont` 按路径缓存已加载的 `TrueTypeFont`，同一字体只加载一次 |
+| HiTLS 库路径 | 由 `build.sh` 自动检测并写入 `cjpm.toml`（cjpm 不支持 `~`，需绝对路径） |
+| TTC 字体路径 | 无需 `,0` 后缀（pdf-cj 自动处理） |
+| 属性访问 | 所有 getter 使用属性语法（无括号），如 `doc.pageSize`、`cell.border` |
+
+---
+
+## 依赖
+
+- **pdf-cj** 项目（本仓库上层目录），通过 `pdf_cj = { path = ".." }` 引用
+- **CJK 字体**：`/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`
+- **OpenHiTLS**：`build.sh` 自动检测（`~/.local/lib/hitls` 等），或用 `HITLS_LIB` 指定

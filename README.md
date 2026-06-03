@@ -212,24 +212,19 @@ let compressed = FlateEncoder.encode(data)
 
 ## 📖 示例
 
-项目包含四个完整示例：
+`examples/` 下包含 23 个功能模块示例（S01–S23），覆盖文档、文本、表格、图片、
+注释、表单、条形码、加密等全部能力，与 `openpdf-examples/` 的 OpenPDF Java 示例一一对应。
 
-1. **hello_world.cj** - 最简单的入门示例（含中英文混排）
-2. **example_chinese.cj** - 中文字体使用示例 **[NEW]**
-3. **example_table.cj** - 表格功能深入演示
-4. **example_comprehensive.cj** - 所有功能综合展示
+`examples/` 是独立的 cjpm 可执行项目，通过 `pdf_cj = { path = ".." }` 依赖本库。
 
 运行示例：
 
 ```bash
-# 构建项目
-cjpm build
+cd examples
+./build.sh                       # 检测 HiTLS、生成 cjpm.toml 并构建
 
-# 运行示例（使用便捷脚本）
-./run_example.sh hello_world
-./run_example.sh example_chinese
-./run_example.sh example_table
-./run_example.sh example_comprehensive
+cjpm run                         # 运行全部 23 个模块（默认）
+cjpm run --run-args "7"          # 运行单个模块（示例：S07 表格）
 ```
 
 详细说明请查看 [examples/README.md](examples/README.md)
@@ -248,13 +243,18 @@ pdf-cj/
 │   ├── table/              # 表格模块（PdfPTable、PdfPCell）
 │   ├── text/               # 文本相关（Font、Color、Alignment）
 │   └── util/               # 工具类（PageSize、Rectangle）
-├── examples/               # 示例程序
-│   ├── hello_world.cj
-│   ├── example_table.cj
-│   ├── example_comprehensive.cj
+├── examples/               # 仓颉示例（独立 cjpm 可执行项目）
+│   ├── src/               # S01–S23 + main.cj + SharedFonts.cj
+│   ├── images/            # 示例图片资源
+│   ├── cjpm.toml.example  # 配置模板（build.sh 据此生成 cjpm.toml）
+│   ├── build.sh           # 检测 HiTLS、生成 cjpm.toml 并构建
+│   └── README.md
+├── openpdf-examples/       # OpenPDF Java 对照示例（与 examples 一一对应）
+│   ├── src/main/java/
+│   ├── images/            # Java 示例自带图片
+│   ├── pom.xml
 │   └── README.md
 ├── cjpm.toml              # 项目配置
-├── DESIGN.md              # API 设计文档
 └── README.md              # 本文件
 ```
 

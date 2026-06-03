@@ -9,6 +9,9 @@ target/
 *.dylib
 *.cj.macrocall
 
+# Java build artifacts (openpdf-examples)
+*.class
+
 # Cache
 .cache/
 
