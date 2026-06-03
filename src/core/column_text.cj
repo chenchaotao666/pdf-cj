@@ -334,7 +334,7 @@ public class ColumnText {
             let baseFont = seg.font.getCalculatedBaseFont()
             let fontName = writer.addFont(baseFont)
             let useUnicode = baseFont.isUnicodeEncoding()
-            baseFont.markStringUsed(seg.text)
+            writer.markFontGlyphs(baseFont, seg.text)
 
             _canvas.beginText()
             _canvas.setFontAndSize(fontName, seg.font.size)
@@ -398,7 +398,7 @@ public class ColumnText {
             let baseFont  = font.getCalculatedBaseFont()
             let fontName  = writer.addFont(baseFont)
             let useUnicode = baseFont.isUnicodeEncoding()
-            baseFont.markStringUsed(chunk.content)
+            writer.markFontGlyphs(baseFont, chunk.content)
 
             _canvas.beginText()
             _canvas.setFontAndSize(fontName, font.size)

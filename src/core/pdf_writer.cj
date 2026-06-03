@@ -5,7 +5,7 @@
 package pdf_cj.core
 
 import std.io.OutputStream
-import std.collection.ArrayList
+import std.collection.{ArrayList, HashMap}
 import std.math.{sin, cos, abs}
 import pdf_cj.base.{
     PdfObject, PdfDictionary, PdfName, PdfNumber, PdfString, PdfArray,
@@ -13,7 +13,7 @@ import pdf_cj.base.{
 }
 import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phrase, Chunk, HeaderFooter, Anchor, Section, Chapter}
 import pdf_cj.util.{Rectangle, PageSize, PdfException}
-import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border}
+import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border, FontSubsetting}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
 import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser, Jp2Parser}
 import pdf_cj.form.{PdfAnnotation, PdfAnnotationFactory, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination, PdfActionGoTo}
@@ -63,6 +63,12 @@ public class PdfWriter <: DocListener {
 
     // 字体缓存
     private var _fontReferences: ArrayList<FontRefEntry> = ArrayList<FontRefEntry>()
+
+    // 按文档跟踪的字体子集（对标 OpenPDF 的 per-writer FontDetails）：
+    // key = baseFont.name。BaseFont 仅提供只读字体程序（可跨文档共享/缓存），
+    // 而“用了哪些字形”记在每个 PdfWriter 自己的子集里，因此同一字体在不同文档中
+    // 各自生成最小子集，互不累积。
+    private var _fontSubsets: HashMap<String, FontSubsetting> = HashMap<String, FontSubsetting>()
 
     // 预留的 Pages 对象编号（在 open() 时分配，供 completePage() 使用）
     private var _pagesObjNum: Int32 = 0
@@ -219,7 +225,7 @@ public class PdfWriter <: DocListener {
 
         // 写入 CIDToGIDMap 流（依赖上方 generateSubsetFont 已填充的 glyphMapping）
         for (pending in _pendingCIDToGIDMaps) {
-            match (pending.baseFont.getFontSubset()) {
+            match (getWriterFontSubset(pending.baseFont)) {
                 case Some(subset) =>
                     let cidToGIDData = subset.buildCIDToGIDMapData()
                     let stream = PdfStream()
@@ -2373,7 +2379,7 @@ public class PdfWriter <: DocListener {
 
         // 根据字体编码选择输出方式
         let useUnicode = baseFont.isUnicodeEncoding()
-        baseFont.markStringUsed(chunk.content)
+        markFontGlyphs(baseFont, chunk.content)
         // 两端对齐时，词间距通过 TJ kern 实现（因 Tw 对 CID 字体的空格 GID 无效）
         if (_justifyWordSpacing > 0.0 && useUnicode) {
             getContent().showTextWithWordSpacing(chunk.content, _justifyWordSpacing, font.size, Some(baseFont))
@@ -2444,6 +2450,37 @@ public class PdfWriter <: DocListener {
      */
     public func addFont(baseFont: BaseFont): String {
         getOrCreateFont(baseFont)
+    }
+
+    /**
+     * 获取本文档中该字体的子集（per-writer FontDetails）。
+     * 仅对“嵌入且有字体程序”的字体返回 Some；否则 None。
+     * 不存在时按需创建一个仅绑定到该字体程序的新子集（不污染 BaseFont 自身）。
+     */
+    func getWriterFontSubset(baseFont: BaseFont): ?FontSubsetting {
+        if (!baseFont.isEmbedded) { return None }
+        match (baseFont.getTrueTypeFont()) {
+            case Some(ttf) =>
+                match (_fontSubsets.get(baseFont.name)) {
+                    case Some(s) => Some(s)
+                    case None =>
+                        let s = FontSubsetting(ttf)
+                        _fontSubsets[baseFont.name] = s
+                        Some(s)
+                }
+            case None => None
+        }
+    }
+
+    /**
+     * 将文本用到的字形标记到本文档的字体子集中（替代直接标记 BaseFont）。
+     * 所有实际渲染文本的路径都应调用它，确保子集完整。
+     */
+    public func markFontGlyphs(baseFont: BaseFont, text: String): Unit {
+        match (getWriterFontSubset(baseFont)) {
+            case Some(s) => s.markStringUsed(text)
+            case None => ()
+        }
     }
 
     /**
@@ -2520,7 +2557,7 @@ public class PdfWriter <: DocListener {
         // CIDToGIDMap：仅 TrueType（CIDFontType2）需要
         // 嵌入字体使用流式 CIDToGIDMap（旧 GID → 紧凑新 GID），未嵌入字体用 Identity
         if (!isCFF) {
-            if (baseFont.isEmbedded && baseFont.getFontSubset().isSome()) {
+            if (baseFont.isEmbedded && baseFont.getTrueTypeFont().isSome()) {
                 let cidToGIDObjNum = _body.reserveObjectNumber()
                 cidFont.put(PdfName("CIDToGIDMap"), PdfIndirectReference(cidToGIDObjNum))
                 _pendingCIDToGIDMaps.add(PendingCIDToGIDMap(cidToGIDObjNum, baseFont))
@@ -2571,8 +2608,8 @@ public class PdfWriter <: DocListener {
                 }
                 let dwUnits: Int32 = 1000  // 对应 DW=1000
 
-                // 收集所有已用字形 ID（嵌入字体通过 FontSubsetting 跟踪）
-                let glyphIds: ArrayList<UInt16> = match (baseFont.getFontSubset()) {
+                // 收集所有已用字形 ID（按文档的 FontSubsetting 跟踪）
+                let glyphIds: ArrayList<UInt16> = match (getWriterFontSubset(baseFont)) {
                     case Some(subset) => subset.getUsedGlyphIds()
                     case None => ArrayList<UInt16>()
                 }
@@ -2659,7 +2696,7 @@ public class PdfWriter <: DocListener {
                 case Some(d) => d
                 case None => Array<UInt8>(0, repeat: UInt8(0))
             }
-            let cffData: Array<UInt8> = match (baseFont.getFontSubset()) {
+            let cffData: Array<UInt8> = match (getWriterFontSubset(baseFont)) {
                 case Some(subset) =>
                     let sub = subset.generateCFFSubset(rawCFF)
                     if (sub.size > 0 && sub.size < rawCFF.size) { sub } else { rawCFF }
@@ -2671,7 +2708,7 @@ public class PdfWriter <: DocListener {
             stream.setContent(compressedCFF)
         } else {
             // TrueType 字体：使用子集数据，压缩写入
-            let fontData: Array<UInt8> = match (baseFont.getFontSubset()) {
+            let fontData: Array<UInt8> = match (getWriterFontSubset(baseFont)) {
                 case Some(subset) =>
                     let subsetData = subset.generateSubsetFont()
                     if (subsetData.size > 0) { subsetData } else { ttf.getFontData() }
