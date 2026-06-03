@@ -1,226 +1,90 @@
 # PDF-CJ
 
-用仓颉语言编写的原生 PDF 库，对标 Java 的 OpenPDF 库。
+用仓颉（Cangjie）语言编写的原生 PDF 库。
+支持从零创建、读取、修改、合并 PDF，内置中文字体嵌入与子集化、表格、图片、
+矢量绘图、书签、注释、表单、条形码、渐变/透明度、加密与数字签名等能力。
 
-[![Cangjie](https://img.shields.io/badge/Cangjie-0.55.3-blue)](https://developer.huawei.com/consumer/cn/cangjie/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
+![Cangjie](https://img.shields.io/badge/Cangjie-1.0.4-blue)
+![License](https://img.shields.io/badge/license-Apache%202.0-green)
 
 ## ✨ 特性
 
-- 📄 **完整的 PDF 创建**：从零创建 PDF 文档
-- 📝 **丰富的文本处理**：支持多种字体、样式和对齐方式
-- 🌏 **中文字体支持**：支持 Unicode 编码和 CIDFont，完美显示中文 **[NEW]**
-- 📊 **强大的表格功能**：支持复杂表格、跨行列、样式定制
-- 🖼️ **图片支持**：支持 JPEG、PNG、GIF、BMP、TIFF 等格式
-- 🗜️ **压缩和编码**：Flate、ASCII Hex、ASCII85 编码
-- 📑 **页面管理**：页眉页脚、页码、自定义页面大小
-- 🎨 **样式控制**：颜色、边框、背景、间距等
-- 🔧 **元数据支持**：标题、作者、关键词等文档属性
+- 📄 **PDF 创建**：从零创建文档，自定义页面大小与边距、元数据
+- 📝 **文本排版**：Chunk / Phrase / Paragraph，字体样式、对齐、缩进、行距、间距
+- 🌏 **中文字体**：Unicode（Identity-H）+ CIDFont，TrueType/OpenType 嵌入并**自动子集化**
+- 📊 **表格**：PdfPTable / PdfPCell，跨行列、表头重复、边框/背景/对齐/内边距
+- 🖼️ **图片**：JPEG、PNG、GIF、BMP、JPEG2000；缩放、旋转、定位
+- ✏️ **底层绘图**：PdfContentByte 路径/填充/描边/贝塞尔/线型/文本/变换/裁剪
+- 📰 **多列排版**：ColumnText
+- 📑 **页面管理**：页眉页脚、页码、PageEvent 页面事件钩子
+- 🔖 **书签与章节**：Chapter / Section 自动书签，PdfOutline 树形大纲
+- 💬 **注释**：文本、链接、高亮、下划线、删除线、方框、圆形、自由文本、图章
+- 📋 **表单**：AcroForm 文本框/复选框/单选/下拉/列表/按钮，读取与填写
+- 🔢 **条形码**：Code 128、EAN-13/8、Code 39、QR、PDF417、DataMatrix
+- 🎨 **渐变与透明**：轴向/径向渐变、Alpha 透明度与混合模式
+- 🔐 **加密与签名**：RC4-128 / AES-128 / AES-256 + 权限控制，PKCS#7 数字签名
+- 📖 **读取与修改**：PdfReader 读取、PdfStamper 盖章/填表、PdfCopy/PdfSmartCopy 合并、文本提取
+- 🗜️ **编码压缩**：Flate、ASCII Hex、ASCII85
 
 ## 📦 安装
 
 ### 从源码构建
 
 ```bash
-git clone https://github.com/yourusername/pdf-cj.git
+git clone https://github.com/chenchaotao666/pdf-cj.git
 cd pdf-cj
 ./build.sh        # 自动检测 HiTLS 路径、生成 cjpm.toml 并构建
-# 或指定路径： HITLS_LIB=/your/path ./build.sh
 ```
 
-> 若已有正确的 `cjpm.toml`（含 HiTLS 路径），也可直接 `cjpm build`。
-
-### 在项目中使用
-
-在您的 `cjpm.toml` 中添加依赖：
-
-```toml
-[dependencies]
-pdf_cj = { path = "../pdf-cj" }
-```
+> pdf-cj 依赖 [OpenHiTLS](https://gitcode.com/openHiTLS/openhitls)（加密 FFI）与 `zlib4cj`（压缩）。
 
 ## 🚀 快速开始
 
-### 基础示例
-
 ```cangjie
-import std.fs.*
-import pdf_cj.*
+import pdf_cj.api.{Document, Paragraph}
+import pdf_cj.core.PdfWriter
+import pdf_cj.text.{Font, BaseFont, FontStyle, Alignment}
+import pdf_cj.util.PageSize
+import std.fs.{File, OpenMode, Path}
 
-main() {
-    // 创建输出文件
-    let output = File(Path("hello.pdf"), OpenMode.Write)
+main(): Int64 {
+    // 1. 创建文档（A4，四边留白 72pt）
+    let doc = Document(PageSize.A4, 72.0, 72.0, 72.0, 72.0)
+    let file = File(Path("hello.pdf"), OpenMode.Write)
+    let writer = PdfWriter.getInstance(doc, file)
 
-    // 创建文档
-    let document = Document(PageSize.A4)
-    let writer = PdfWriter.getInstance(document, output)
+    doc.addTitle("我的第一个 PDF")
+    doc.open()
 
-    // 设置元数据
-    document.addTitle("我的第一个PDF")
-    document.addAuthor("张三")
-
-    // 打开文档
-    document.open()
-
-    // 添加英文标题
-    let titleFont = Font(FontFamily.Helvetica, 20.0, FontStyle.Bold)
-    let title = Paragraph("Hello, PDF-CJ!", titleFont)
+    // 2. 英文标题（标准 14 字体，无需嵌入）
+    let helv = BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED)
+    let title = Paragraph("Hello, PDF-CJ!", Font(helv, 20.0, FontStyle.Bold))
     title.setAlignment(Alignment.Center)
-    document.add(title)
+    doc.add(title)
 
-    // 添加中文段落
-    let chineseBaseFont = BaseFont.createFont("SimSun", BaseFont.IDENTITY_H, BaseFont.NOT_EMBEDDED)
-    let chineseFont = Font(chineseBaseFont, 12.0, FontStyle.Normal)
-    let para = Paragraph("这是我的第一个PDF文档。", chineseFont)
-    document.add(para)
+    // 3. 中文段落（嵌入 CJK 字体，自动子集化）
+    let cjk = BaseFont.createFont(
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        BaseFont.IDENTITY_H, BaseFont.EMBEDDED)
+    doc.add(Paragraph("这是我的第一个 PDF 文档。", Font(cjk, 12.0)))
 
-    // 关闭文档
-    document.close()
-    output.close()
-
-    println("PDF创建成功！")
+    // 4. 关闭文档（写出 xref / trailer）
+    doc.close()
+    0
 }
-```
-
-### 中文字体支持
-
-PDF-CJ 现已完美支持中文！详细使用方法请查看 [中文字体支持指南](CHINESE_SUPPORT.md)。
-
-```cangjie
-// 使用系统字体
-let font = BaseFont.createFont("SimSun", BaseFont.IDENTITY_H, BaseFont.NOT_EMBEDDED)
-
-// 或使用字体文件（推荐）
-let font = BaseFont.createFont(
-    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-    BaseFont.IDENTITY_H,
-    BaseFont.EMBEDDED
-)
 ```
 
 ## 📚 文档
 
-### 核心功能
-
-#### 1. 创建文档
-
-```cangjie
-// 默认 A4 页面
-let document = Document()
-
-// 自定义页面大小
-let document = Document(PageSize.LETTER)
-
-// 自定义边距（左、右、上、下）
-let document = Document(PageSize.A4, 50.0, 50.0, 50.0, 50.0)
-```
-
-#### 2. 文本和段落
-
-```cangjie
-// 创建字体
-let font = Font(FontFamily.Helvetica, 14.0, FontStyle.Bold)
-
-// 创建段落
-let para = Paragraph("段落内容", font)
-para.setAlignment(Alignment.Center)
-para.setSpacingAfter(20.0)
-para.setFirstLineIndent(20.0)
-
-// 添加到文档
-document.add(para)
-```
-
-#### 3. 表格
-
-```cangjie
-// 创建 3 列表格
-let table = PdfPTable(3)
-table.setWidthPercentage(100.0)
-
-// 添加表头
-let headerCell = PdfPCell(Phrase("表头", headerFont))
-headerCell.setHorizontalAlignment(Alignment.Center)
-headerCell.setBackgroundColor(Color(200, 200, 200))
-headerCell.setPadding(8.0)
-table.addCell(headerCell)
-
-// 添加数据单元格
-table.addCell("数据1")
-table.addCell("数据2")
-table.addCell("数据3")
-
-// 跨列单元格
-let spanCell = PdfPCell(Phrase("合并单元格", font))
-spanCell.setColspan(3)
-table.addCell(spanCell)
-
-document.add(table)
-```
-
-#### 4. 图片
-
-```cangjie
-// 加载图片
-let image = Image.getInstance("photo.jpg")
-
-// 缩放到 50%
-image.scalePercent(50.0)
-
-// 或缩放到指定大小
-image.scaleAbsolute(200.0, 150.0)
-
-// 或适应指定区域（保持宽高比）
-image.scaleToFit(400.0, 300.0)
-
-// 设置对齐方式
-image.setAlignment(Alignment.Center)
-
-document.add(image)
-```
-
-#### 5. 页眉和页脚
-
-```cangjie
-// 设置页眉
-let headerFont = Font(FontFamily.Helvetica, 10.0, FontStyle.Italic)
-let headerPhrase = Phrase("文档标题", headerFont)
-let header = HeaderFooter(headerPhrase, false)
-header.setAlignment(Alignment.Right)
-document.setHeader(header)
-
-// 设置页脚（带页码）
-let footerPhrase = Phrase("第 ", headerFont)
-let afterPhrase = Phrase(" 页", headerFont)
-let footer = HeaderFooter(footerPhrase, true, afterPhrase)
-footer.setAlignment(Alignment.Center)
-document.setFooter(footer)
-```
-
-#### 6. 编码和压缩
-
-```cangjie
-// ASCII Hex 编码
-let data: Array<UInt8> = [0x48, 0x65, 0x6C, 0x6C, 0x6F]
-let hexEncoded = ASCIIHexEncoder.encode(data)
-// 输出: "48656C6C6F>"
-
-// ASCII85 编码
-let ascii85Encoded = ASCII85Encoder.encode(data)
-// 输出: "87cURD]j~>"
-
-// Flate 压缩
-let compressed = FlateEncoder.encode(data)
-```
+- **[完整 API 指南 docs/feature_api.md](docs/feature_api.md)** —— 23 节、覆盖全部公开 API，
+  含文档/字体/颜色/文本/表格/图片/绘图/书签/注释/表单/条形码/加密/读取/合并/文本提取等用法与代码片段。
+- **[示例 examples/](examples/README.md)** —— 23 个可运行的端到端示例（S01–S23）。
+- **[gap 分析 docs/openpdf-gap-analysis.md](docs/openpdf-gap-analysis.md)** —— 与 OpenPDF 的对照差距。
 
 ## 📖 示例
 
-`examples/` 下包含 23 个功能模块示例（S01–S23），覆盖文档、文本、表格、图片、
-注释、表单、条形码、加密等全部能力，与 `openpdf-examples/` 的 OpenPDF Java 示例一一对应。
-
-`examples/` 是独立的 cjpm 可执行项目，通过 `pdf_cj = { path = ".." }` 依赖本库。
-
-运行示例：
+`examples/` 是一个独立的 cjpm 可执行项目，通过 `pdf_cj = { path = ".." }` 依赖本库，
+包含 23 个功能模块（S01–S23），与 `openpdf-examples/` 下的 OpenPDF Java 示例一一对应。
 
 ```bash
 cd examples
@@ -230,7 +94,7 @@ cjpm run                         # 运行全部 23 个模块（默认）
 cjpm run --run-args "7"          # 运行单个模块（示例：S07 表格）
 ```
 
-详细说明请查看 [examples/README.md](examples/README.md)
+详细说明见 [examples/README.md](examples/README.md)。
 
 ## 🏗️ 项目结构
 
@@ -238,13 +102,17 @@ cjpm run --run-args "7"          # 运行单个模块（示例：S07 表格）
 pdf-cj/
 ├── src/
 │   ├── lib.cj              # 主入口，导出所有公共 API
-│   ├── api/                # 核心 API（Document、Element、Paragraph等）
-│   ├── base/               # 基础对象（PdfObject、PdfDictionary等）
+│   ├── api/                # 高层元素（Document、Paragraph、Chunk、Chapter…）
+│   ├── base/               # 基础对象（PdfObject、PdfDictionary、输出流…）
 │   ├── codec/              # 编码器（Flate、ASCIIHex、ASCII85）
-│   ├── core/               # 核心写入器（PdfWriter、PdfContentByte）
-│   ├── image/              # 图片处理（Image、ImageType）
-│   ├── table/              # 表格模块（PdfPTable、PdfPCell）
-│   ├── text/               # 文本相关（Font、Color、Alignment）
+│   ├── core/               # 写入器与画布（PdfWriter、PdfContentByte、渐变、ColumnText…）
+│   ├── text/               # 字体与文本（BaseFont、Font、Color、字体子集化…）
+│   ├── table/              # 表格（PdfPTable、PdfPCell）
+│   ├── image/              # 图片（Image、各格式解析器）
+│   ├── form/               # 注释、表单、书签、动作
+│   ├── barcode/            # 条形码（128/EAN/39/QR/PDF417/DataMatrix）
+│   ├── security/           # 加密、PKCS#7 签名、证书
+│   ├── reader/             # 读取/盖章/合并/文本提取
 │   └── util/               # 工具类（PageSize、Rectangle）
 ├── examples/               # 仓颉示例（独立 cjpm 可执行项目）
 │   ├── src/               # S01–S23 + main.cj + SharedFonts.cj
@@ -254,73 +122,23 @@ pdf-cj/
 │   └── README.md
 ├── openpdf-examples/       # OpenPDF Java 对照示例（与 examples 一一对应）
 │   ├── src/main/java/
-│   ├── images/            # Java 示例自带图片
+│   ├── images/
 │   ├── pom.xml
 │   └── README.md
+├── docs/                   # feature_api.md（API 指南）、gap 分析
 ├── build.sh               # 检测 HiTLS、生成 cjpm.toml 并构建
 ├── cjpm.toml.example      # 配置模板（build.sh 据此生成 cjpm.toml）
 └── README.md              # 本文件
 ```
 
-## 🔧 开发状态
-
-当前版本：**v0.1.0**
-
-### ✅ 已完成功能
-
-- [x] 文档创建和基本属性
-- [x] 文本处理（Chunk、Phrase、Paragraph）
-- [x] 字体支持（Helvetica、Times、Courier 等）
-- [x] **中文字体支持（Unicode、CIDFont）** **[NEW]**
-- [x] 表格功能（PdfPTable、跨行列、样式）
-- [x] 图片支持（JPEG、PNG、GIF、BMP、TIFF）
-- [x] 编码和压缩（Flate、ASCIIHex、ASCII85）
-- [x] 页眉和页脚
-- [x] 颜色和对齐方式
-- [x] 页面大小和边距
-- [x] 基础 PDF 对象模型
-- [x] PdfWriter 核心写入逻辑
-
-### 🚧 进行中
-
-- [ ] 字体子集化（减小嵌入字体的文件大小）
-- [ ] ToUnicode CMap（改进文本提取）
-- [ ] 高级绘图 API（线条、形状）
-- [ ] 书签和目录
-- [ ] PDF 表单
-- [ ] 加密和权限控制
-
-### 📝 计划中
-
-- [ ] PDF 读取和解析
-- [ ] PDF 修改和合并
-- [ ] 数字签名
-- [ ] PDF/A 支持
-- [ ] 性能优化
-
-## 🤝 贡献
-
-欢迎贡献代码、报告问题或提出建议！
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
 ## 📄 许可证
 
-本项目采用 Apache 2.0 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+本项目采用 **MIT License** 许可证。
 
 ## 🙏 致谢
 
 - 灵感来源于 Java 的 [OpenPDF](https://github.com/LibrePDF/OpenPDF) 库
-- 感谢华为仓颉团队提供优秀的编程语言
-
-## 📧 联系方式
-
-- 问题反馈：[GitHub Issues](https://github.com/yourusername/pdf-cj/issues)
-- 讨论交流：[GitHub Discussions](https://github.com/yourusername/pdf-cj/discussions)
+- 加密能力基于 [OpenHiTLS](https://gitcode.com/openHiTLS/openhitls)
 
 ---
 
