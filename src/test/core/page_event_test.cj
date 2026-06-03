@@ -150,11 +150,16 @@ public class PageEventMultiPageTests {
     func testStartPageFiresForEachPage(): Unit {
         let tracker = TrackingEvent()
         let (document, file) = openTrackedDoc("/tmp/pe_multistart.pdf", tracker)
+        let font = makeHelvetica()
+        // 每页需有内容才会真正换页（空页 newPage 与 OpenPDF 一致会被跳过）
+        document.add(Paragraph("Page 1", font))
         document.newPage()
+        document.add(Paragraph("Page 2", font))
         document.newPage()
+        document.add(Paragraph("Page 3", font))
         document.close()
         file.close()
-        // 初始页 + 2 次 newPage = 3 页
+        // 初始页 + 2 次有效 newPage = 3 页
         @Expect(tracker.startPageCount, 3)
     }
 
@@ -162,8 +167,12 @@ public class PageEventMultiPageTests {
     func testEndPageFiresForEachPage(): Unit {
         let tracker = TrackingEvent()
         let (document, file) = openTrackedDoc("/tmp/pe_multiend.pdf", tracker)
+        let font = makeHelvetica()
+        document.add(Paragraph("Page 1", font))
         document.newPage()
+        document.add(Paragraph("Page 2", font))
         document.newPage()
+        document.add(Paragraph("Page 3", font))
         document.close()
         file.close()
         @Expect(tracker.endPageCount, 3)
@@ -173,10 +182,27 @@ public class PageEventMultiPageTests {
     func testStartAndEndPageCountsMatch(): Unit {
         let tracker = TrackingEvent()
         let (document, file) = openTrackedDoc("/tmp/pe_match.pdf", tracker)
+        let font = makeHelvetica()
+        document.add(Paragraph("Page 1", font))
         document.newPage()
+        document.add(Paragraph("Page 2", font))
         document.close()
         file.close()
         @Expect(tracker.startPageCount, tracker.endPageCount)
+    }
+
+    @TestCase
+    func testEmptyNewPageIsSkipped(): Unit {
+        // 空白页 newPage 应被跳过（不产生空白页、不触发额外事件），与 OpenPDF 行为一致
+        let tracker = TrackingEvent()
+        let (document, file) = openTrackedDoc("/tmp/pe_emptyskip.pdf", tracker)
+        document.newPage()
+        document.newPage()
+        document.close()
+        file.close()
+        // 只有初始页：start=1, end=1
+        @Expect(tracker.startPageCount, 1)
+        @Expect(tracker.endPageCount, 1)
     }
 }
 
