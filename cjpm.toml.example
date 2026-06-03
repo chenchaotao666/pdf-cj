@@ -7,14 +7,22 @@ cjc-version = "1.0.4"
 output-type = "static"
 
 [dependencies]
-# 这里需要引用chaoling83/zlib4cj.git，作者进行了修改，官方Cangjie-TPC/zlib4cj的有编译问题
+# 引用 chaoling83/zlib4cj.git（作者修改版，官方 Cangjie-TPC/zlib4cj 有编译问题）
 zlib4cj = { git = "https://gitcode.com/chaoling83/zlib4cj.git" }
 
 [test-dependencies]
 
-# openHiTLS FFI — 路径由 configure.sh 自动检测并填入
-# 如需手动指定：HITLS_LIB=/your/path ./configure.sh
+# openHiTLS FFI 配置
+#
+# 推荐使用 ./build.sh 脚本进行编译，它会自动检测 HiTLS 库位置并生成本文件。
+#
+# 如果要直接使用 cjpm build，需要把下面的路径改为你的实际路径。
+# 注意：cjpm 不支持 ~ 符号，必须使用绝对路径。
+#
+# 常见安装位置：
+#   - /home/YOUR_USERNAME/.local/lib/hitls
+#   - /usr/local/lib
 [ffi.c]
-hitls_crypto = { path = "@HITLS_LIB@" }
-hitls_bsl = { path = "@HITLS_LIB@" }
-boundscheck = { path = "@BOUNDSCHECK_LIB@" }
+hitls_crypto = { path = "/path/to/your/hitls/lib" }
+hitls_bsl = { path = "/path/to/your/hitls/lib" }
+boundscheck = { path = "/path/to/your/hitls/lib" }

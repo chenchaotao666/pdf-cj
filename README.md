@@ -24,8 +24,11 @@
 ```bash
 git clone https://github.com/yourusername/pdf-cj.git
 cd pdf-cj
-cjpm build
+./build.sh        # 自动检测 HiTLS 路径、生成 cjpm.toml 并构建
+# 或指定路径： HITLS_LIB=/your/path ./build.sh
 ```
+
+> 若已有正确的 `cjpm.toml`（含 HiTLS 路径），也可直接 `cjpm build`。
 
 ### 在项目中使用
 
@@ -254,7 +257,8 @@ pdf-cj/
 │   ├── images/            # Java 示例自带图片
 │   ├── pom.xml
 │   └── README.md
-├── cjpm.toml              # 项目配置
+├── build.sh               # 检测 HiTLS、生成 cjpm.toml 并构建
+├── cjpm.toml.example      # 配置模板（build.sh 据此生成 cjpm.toml）
 └── README.md              # 本文件
 ```
 
