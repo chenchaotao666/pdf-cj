@@ -2,19 +2,18 @@ package pdf_cj_examples
 
 import pdf_cj.api.{Document, Paragraph}
 import pdf_cj.core.PdfWriter
-import pdf_cj.text.{BaseFont, Font, FontFactory, FontStyle, Color, Alignment}
+import pdf_cj.text.{Font, FontFactory, FontStyle, Color, Alignment}
 import pdf_cj.api.FontSelector
 import pdf_cj.util.{PageSize}
 import std.fs.{File, OpenMode, Path}
 
-let _s02_FONT  = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 let _s02_OUT   = "output/"
 
 func s02_fontText(): Unit {
     println("S02: Font & Text Demo")
     try {
-        let cjkBf  = BaseFont.createFont(_s02_FONT, BaseFont.IDENTITY_H, BaseFont.EMBEDDED)
-        let helvBf = BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED)
+        let cjkBf  = newCjkBf()
+        let helvBf = newHelvBf()
 
         let doc = Document(PageSize.A4, 72.0, 72.0, 72.0, 72.0)
         let file = File(Path(_s02_OUT + "cj_s02_font_text.pdf"), OpenMode.Write)

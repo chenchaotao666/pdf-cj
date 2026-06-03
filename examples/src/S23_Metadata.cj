@@ -8,7 +8,6 @@ import pdf_cj.util.{PageSize, Rectangle}
 import std.fs.{File, OpenMode, Path}
 import std.collection.HashMap
 
-let _s23_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 let _s23_OUT  = "output/"
 
 

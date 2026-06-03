@@ -7,7 +7,6 @@ import pdf_cj.text.{BaseFont, Font, FontStyle, Color, Alignment}
 import pdf_cj.util.{PageSize, Rectangle}
 import std.fs.{File, OpenMode, Path}
 
-let _s12_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 let _s12_OUT  = "output/"
 
 

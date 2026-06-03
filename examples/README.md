@@ -23,6 +23,19 @@ cjpm run --run-args "07"       # 同上
 
 输出目录：`examples/output/`　图片资源：`examples/images/`
 
+### CJK 字体解析
+
+示例需要一个中文字体文件。`src/SharedFonts.cj` 的 `resolveCjkFont()` 按以下优先级查找：
+
+1. **环境变量 `PDFCJ_CJK_FONT`**（部署时显式指定）：
+   ```bash
+   PDFCJ_CJK_FONT=/path/to/NotoSansCJK-Regular.ttc cjpm run
+   ```
+2. **随仓库打包的字体** `examples/fonts/NotoSansCJK-Regular.ttc`（开箱即用，保证可移植）；
+3. **常见系统路径**（Linux Noto/文泉驿、macOS PingFang、Windows 微软雅黑/宋体）。
+
+全部找不到时会抛出明确错误并提示如何配置。
+
 ---
 
 ## 文件列表
@@ -73,18 +86,6 @@ cjpm run --run-args "07"       # 同上
 | `BarcodeQRCode` | `BarcodeQRCode` | pdf-cj 支持二维码 |
 | `writer.setEncryption(AES_256, ...)` | `writer.setEncryption(...)` | pdf-cj 支持 AES-256 |
 | `PdfTextExtractor.getTextFromPage(...)` | `PdfReader.getTextFromPage(...)` | pdf-cj 内置文本提取 |
-
----
-
-## 编译注意事项
-
-| 问题 | 处理方式 |
-|------|---------|
-| 多文件同包时模块级 `let` 命名冲突 | 使用 `_sXX_` 前缀，或将变量声明在函数体内 |
-| 反复加载 CJK 大字体导致 OOM | pdf-cj 的 `BaseFont` 按路径缓存已加载的 `TrueTypeFont`，同一字体只加载一次 |
-| HiTLS 库路径 | 由 `build.sh` 自动检测并写入 `cjpm.toml`（cjpm 不支持 `~`，需绝对路径） |
-| TTC 字体路径 | 无需 `,0` 后缀（pdf-cj 自动处理） |
-| 属性访问 | 所有 getter 使用属性语法（无括号），如 `doc.pageSize`、`cell.border` |
 
 ---
 

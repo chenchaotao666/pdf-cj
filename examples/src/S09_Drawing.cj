@@ -7,7 +7,6 @@ import pdf_cj.util.PageSize
 import std.fs.{File, OpenMode, Path}
 import std.math.{sin, cos}
 
-let _s09_FONT = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 let _s09_OUT  = "output/"
 
 
