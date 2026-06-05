@@ -22,7 +22,8 @@ public import pdf_cj.core.{
 // 导出文本相关
 public import pdf_cj.text.{
     Font, BaseFont, FontFactory, FontStyle, FontFamily,
-    Color, CMYKColor, GrayColor, Alignment, VerticalAlignment
+    Color, CMYKColor, GrayColor, Alignment, VerticalAlignment,
+    CJKNamedFont
 }
 
 // 导出工具类

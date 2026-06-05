@@ -46,6 +46,8 @@ public class RunAllSections {
             new Section("S21_ColumnText",    () -> S21_ColumnText.main(empty)),
             new Section("S22_Chapter",       () -> S22_Chapter.main(empty)),
             new Section("S23_Metadata",      () -> S23_Metadata.main(empty)),
+            new Section("S24_FontRegistry",  () -> S24_FontRegistry.main(empty)),
+            new Section("S25_CJKCMap",       () -> S25_CJKCMap.main(empty)),
         };
 
         // 解析参数：无参 / "all" → 全部；数字 → 单个 section

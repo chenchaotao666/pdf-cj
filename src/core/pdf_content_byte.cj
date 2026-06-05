@@ -1051,6 +1051,20 @@ public class PdfContentByte {
      * @param baseFont 用于转换的字体，如果为 None 则使用 Unicode 码点
      */
     private func appendHexStringWithFont(s: String, baseFont: ?BaseFont): Unit {
+        // 预置 CMap 的命名 CJK 字体：内容流写 Unicode（UCS-2）码点本身，
+        // 由阅读器内置的预定义 CMap 映射为 CID，不做 GID 转换。
+        match (baseFont) {
+            case Some(font) where font.getCJKNamedFont().isSome() =>
+                for (rune in s.runes()) {
+                    let code = UInt32(rune)
+                    let cu: UInt16 = if (code <= 0xFFFF) { UInt16(code) } else { UInt16(0) }
+                    appendByteAsHex(UInt8((cu >> 8) & 0xFF))
+                    appendByteAsHex(UInt8(cu & 0xFF))
+                }
+                return
+            case _ => ()
+        }
+
         // 遍历每个 Unicode 字符
         for (rune in s.runes()) {
             let code = UInt32(rune)

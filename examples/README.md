@@ -65,6 +65,8 @@ cjpm run --run-args "07"       # 同上
 | `S21_ColumnText.cj` | ColumnText 多列排版 | `cj_s21_column_text.pdf` |
 | `S22_Chapter.cj` | Chapter / Section 章节 | `cj_s22_chapter.pdf` |
 | `S23_Metadata.cj` | 元数据与版本 | `cj_s23_metadata.pdf` |
+| `S24_FontRegistry.cj` | FontFactory.registerDirectories 按名加载 | `cj_s24_font_registry.pdf` |
+| `S25_CJKCMap.cj` | 预置 CMap 命名 CJK 字体（不嵌入） | `cj_s25_cjk_cmap.pdf` |
 | `main.cj` | 入口调度器（all / 编号） | 所有上述 PDF |
 | `SharedFonts.cj` | 共享字体工厂（内部依赖） | — |
 

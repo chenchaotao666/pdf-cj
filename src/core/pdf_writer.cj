@@ -13,7 +13,7 @@ import pdf_cj.base.{
 }
 import pdf_cj.api.{Document, DocListener, Element, ElementType, Paragraph, Phrase, Chunk, HeaderFooter, Anchor, Section, Chapter}
 import pdf_cj.util.{Rectangle, PageSize, PdfException}
-import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border, FontSubsetting}
+import pdf_cj.text.{Font, BaseFont, Alignment, VerticalAlignment, TrueTypeFont, Color, Border, FontSubsetting, CJKNamedFont}
 import pdf_cj.table.{PdfPTable, PdfPCell, PdfPRow}
 import pdf_cj.image.{Image, ImageType, PngParser, PngInfo, GifParser, BmpParser, Jp2Parser}
 import pdf_cj.form.{PdfAnnotation, PdfAnnotationFactory, PdfFormField, PdfOutlineTree, PdfOutline, PdfDestination, PdfActionGoTo}
@@ -69,6 +69,9 @@ public class PdfWriter <: DocListener {
     // 而“用了哪些字形”记在每个 PdfWriter 自己的子集里，因此同一字体在不同文档中
     // 各自生成最小子集，互不累积。
     private var _fontSubsets: HashMap<String, FontSubsetting> = HashMap<String, FontSubsetting>()
+
+    // 按文档跟踪预置 CMap CJK 字体用到的 Unicode 字符（key = baseFont.name），用于生成 W 数组
+    private var _cjkUsedChars: HashMap<String, HashMap<UInt32, Bool>> = HashMap<String, HashMap<UInt32, Bool>>()
 
     // 预留的 Pages 对象编号（在 open() 时分配，供 completePage() 使用）
     private var _pagesObjNum: Int32 = 0
@@ -931,6 +934,19 @@ public class PdfWriter <: DocListener {
     }
 
     // Build a segment Chunk from segText with all formatting copied from the template chunk
+    // CJK 字符可作为断行点（在任意 CJK 字之间可换行，无需空格）。
+    // 覆盖：表意文字、假名、谚文、CJK 符号/标点、全角形式。
+    private func isCJKBreakable(u: UInt32): Bool {
+        (u >= 0x4E00 && u <= 0x9FFF) ||   // CJK 统一表意文字
+        (u >= 0x3400 && u <= 0x4DBF) ||   // 扩展 A
+        (u >= 0x3040 && u <= 0x30FF) ||   // 平假名 + 片假名
+        (u >= 0x31F0 && u <= 0x31FF) ||   // 片假名拼音扩展
+        (u >= 0xAC00 && u <= 0xD7AF) ||   // 谚文音节
+        (u >= 0x3000 && u <= 0x303F) ||   // CJK 符号与标点
+        (u >= 0xFF00 && u <= 0xFFEF) ||   // 全角/半角形式
+        (u >= 0x20000 && u <= 0x2A6DF)    // 扩展 B
+    }
+
     private func buildSegChunk(segText: String, template: Chunk): Chunk {
         let seg = Chunk(segText, template.font)
         match (template.color) {
@@ -1098,8 +1114,8 @@ public class PdfWriter <: DocListener {
                 } else {
                     segText += charStr
                     segWidth += charWidth
-                    // Track the last space as a potential line-break point
-                    if (r == r' ') {
+                    // 记录潜在断点：空格之后，或 CJK 字符之后（CJK 可在任意字间断行）
+                    if (r == r' ' || isCJKBreakable(UInt32(r))) {
                         lastBreakText = segText
                         lastBreakWidth = segWidth
                         hasBreak = true
@@ -2481,6 +2497,19 @@ public class PdfWriter <: DocListener {
             case Some(s) => s.markStringUsed(text)
             case None => ()
         }
+        // 预置 CMap 的命名 CJK 字体：记录用到的 Unicode 字符（用于 W 数组）
+        match (baseFont.getCJKNamedFont()) {
+            case Some(_) =>
+                let set = match (_cjkUsedChars.get(baseFont.name)) {
+                    case Some(m) => m
+                    case None =>
+                        let m = HashMap<UInt32, Bool>()
+                        _cjkUsedChars[baseFont.name] = m
+                        m
+                }
+                for (r in text.runes()) { set[UInt32(r)] = true }
+            case None => ()
+        }
     }
 
     /**
@@ -2526,6 +2555,12 @@ public class PdfWriter <: DocListener {
      * 创建 CIDFont（用于 Unicode 字体）
      */
     private func createCIDFont(baseFont: BaseFont): PdfIndirectReference {
+        // 预置 CMap 的命名 CJK 字体：不嵌入，走专用写法
+        match (baseFont.getCJKNamedFont()) {
+            case Some(cjk) => return createCJKNamedFontDict(baseFont, cjk)
+            case None => ()
+        }
+
         // 创建 CIDSystemInfo 字典
         let cidSystemInfo = PdfDictionary()
         cidSystemInfo.put(PdfName("Registry"), PdfString("Adobe"))
@@ -2595,10 +2630,112 @@ public class PdfWriter <: DocListener {
     }
 
     /**
+     * 写预置 CMap 的命名 CJK 字体（Type0/CIDFontType0，不嵌入字形）。
+     */
+    private func createCJKNamedFontDict(baseFont: BaseFont, cjk: CJKNamedFont): PdfIndirectReference {
+        // FontDescriptor（无 FontFile，不嵌入）
+        let desc = PdfDictionary()
+        desc.put(PdfName.TYPE, PdfName("FontDescriptor"))
+        desc.put(PdfName("FontName"), PdfName(cjk.fontName))
+        desc.put(PdfName("Flags"), PdfNumber(cjk.flags))
+        let bbox = PdfArray()
+        for (v in cjk.bbox) { bbox.add(PdfNumber(v)) }
+        desc.put(PdfName("FontBBox"), bbox)
+        desc.put(PdfName("ItalicAngle"), PdfNumber(cjk.italicAngle))
+        desc.put(PdfName("Ascent"), PdfNumber(cjk.ascent))
+        desc.put(PdfName("Descent"), PdfNumber(cjk.descent))
+        desc.put(PdfName("CapHeight"), PdfNumber(cjk.capHeight))
+        desc.put(PdfName("StemV"), PdfNumber(cjk.stemV))
+        let descRef = _body.add(desc)
+
+        // CIDFontType0
+        let cidFont = PdfDictionary()
+        cidFont.put(PdfName.TYPE, PdfName.FONT)
+        cidFont.put(PdfName("Subtype"), PdfName("CIDFontType0"))
+        cidFont.put(PdfName.BASEFONT, PdfName(cjk.fontName))
+        let csi = PdfDictionary()
+        csi.put(PdfName("Registry"), PdfString(cjk.registry))
+        csi.put(PdfName("Ordering"), PdfString(cjk.ordering))
+        csi.put(PdfName("Supplement"), PdfNumber(cjk.supplement))
+        cidFont.put(PdfName("CIDSystemInfo"), csi)
+        cidFont.put(PdfName("FontDescriptor"), descRef)
+        cidFont.put(PdfName("DW"), PdfNumber(1000))
+        let wArrayObjNum = _body.reserveObjectNumber()
+        cidFont.put(PdfName("W"), PdfIndirectReference(wArrayObjNum))
+        _pendingWArrays.add(PendingWArray(wArrayObjNum, baseFont))
+        let cidFontRef = _body.add(cidFont)
+
+        // Type0：/Encoding 用预定义 CMap 名（阅读器内置）
+        let fontDict = PdfDictionary()
+        fontDict.put(PdfName.TYPE, PdfName.FONT)
+        fontDict.put(PdfName.SUBTYPE, PdfName("Type0"))
+        fontDict.put(PdfName.BASEFONT, PdfName(cjk.fontName))
+        fontDict.put(PdfName.ENCODING, PdfName(cjk.cmapName))
+        let df = PdfArray()
+        df.add(cidFontRef)
+        fontDict.put(PdfName("DescendantFonts"), df)
+        _body.add(fontDict)
+    }
+
+    /**
+     * 构建预置 CMap CJK 字体的 W 数组：按用到的字符 Unicode→CID→精确宽度。
+     */
+    private func buildCJKWArray(baseFont: BaseFont, cjk: CJKNamedFont): PdfArray {
+        let wArray = PdfArray()
+        let used = match (_cjkUsedChars.get(baseFont.name)) {
+            case Some(m) => m
+            case None => return wArray
+        }
+        // 收集 cid→width（仅与 DW=1000 不同的）
+        let cidWidths = HashMap<UInt16, Int32>()
+        for ((u, _) in used) {
+            let cid = cjk.unicodeToCid(u)
+            if (cid == 0) { continue }
+            let w = cjk.cidWidth(cid)
+            if (w != 1000) { cidWidths[cid] = w }
+        }
+        // 按 cid 排序输出 [cid [w] cid [w] ...]
+        let cids = ArrayList<UInt16>()
+        for ((c, _) in cidWidths) { cids.add(c) }
+        sortU16(cids)
+        for (i in 0..cids.size) {
+            let c = cids[i]
+            wArray.add(PdfNumber(Int32(c)))
+            let inner = PdfArray()
+            match (cidWidths.get(c)) {
+                case Some(w) => inner.add(PdfNumber(w))
+                case None => ()
+            }
+            wArray.add(inner)
+        }
+        wArray
+    }
+
+    private func sortU16(a: ArrayList<UInt16>): Unit {
+        // 简单插入排序（W 项通常很少）
+        var i: Int64 = 1
+        while (i < a.size) {
+            let key = a[i]
+            var j = i - 1
+            while (j >= 0 && a[j] > key) {
+                a[j + 1] = a[j]
+                j -= 1
+            }
+            a[j + 1] = key
+            i += 1
+        }
+    }
+
+    /**
      * 构建 CIDFont W 数组（仅包含与 DW 不同的字形宽度）
      * W 数组格式：[glyphId [width] glyphId [width] ...]
      */
     private func buildWArray(baseFont: BaseFont): PdfArray {
+        // 预置 CMap CJK 字体走专用 W 构建
+        match (baseFont.getCJKNamedFont()) {
+            case Some(cjk) => return buildCJKWArray(baseFont, cjk)
+            case None => ()
+        }
         let wArray = PdfArray()
         match (baseFont.getTrueTypeFont()) {
             case Some(ttf) =>

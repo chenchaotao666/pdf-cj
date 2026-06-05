@@ -19,6 +19,7 @@ public class BaseFont {
     private var ttfFont: ?TrueTypeFont = None  // TrueType 字体对象
     private var fontSubset: ?FontSubsetting = None  // 字体子集化对象（用于嵌入字体）
     private var _subsetFontName: ?String = None  // 子集字体名称（6字符前缀+字体名）
+    private var _cjkNamedFont: ?CJKNamedFont = None  // 预置 CMap 的命名 CJK 字体（不嵌入）
 
     // 按路径缓存已加载的 TrueTypeFont（原始字体数据只读，可跨 BaseFont 共享）。
     // 避免同一字体（如 19MB 的 NotoSansCJK）被反复加载导致内存暴涨/OOM。
@@ -96,9 +97,49 @@ public class BaseFont {
             return baseFont
         }
 
+        // 按名解析：若该名字已通过 FontFactory.register*/registerDirectories 注册，
+        // 则解析为对应字体文件并按文件方式加载（可嵌入），实现「给名字不给路径」。
+        match (FontFactory.getRegisteredPath(name)) {
+            case Some(path) =>
+                // 注册值可能是标准 14 字体名（无文件）：按标准字体处理
+                if (isStandardFont(path)) {
+                    return BaseFont(path, encoding, false, None)
+                }
+                let fontBaseName = extractFontName(path)
+                let baseFont = BaseFont(fontBaseName, encoding, embedded, Some(path))
+                if (encoding == IDENTITY_H || encoding == IDENTITY_V || embedded) {
+                    baseFont.loadTrueTypeFont(path)
+                }
+                return baseFont
+            case None => ()
+        }
+
         // 尝试作为系统字体名称
         // 对于中文字体，允许直接使用字体名称
         return BaseFont(name, encoding, embedded, None)
+    }
+
+    /**
+     * 创建预置 CMap 的命名 CJK 字体（不嵌入字形，依赖阅读器自带 CJK 字体，
+     * 字宽来自打包的 Adobe 度量）。对标 OpenPDF 的 iText-Asian 方案。
+     *
+     * @param fontName 命名字体（STSong-Light / MSung-Light / KozMinPro-Regular / HYSMyeongJo-Medium）
+     * @param cmapEncoding 预定义 CMap 名（UniGB-UCS2-H / UniCNS-UCS2-H / UniJIS-UCS2-H / UniKS-UCS2-H）
+     */
+    public static func createFontCJK(fontName: String, cmapEncoding: String): BaseFont {
+        match (CJKNamedFont.forFont(fontName)) {
+            case Some(cjk) =>
+                let bf = BaseFont(fontName, cmapEncoding, false, None)
+                bf._cjkNamedFont = Some(cjk)
+                return bf
+            case None =>
+                throw PdfException("不支持的 CJK 命名字体: ${fontName}（支持 STSong-Light/MSung-Light/KozMinPro-Regular/HYSMyeongJo-Medium）")
+        }
+    }
+
+    /** 该字体是否为预置 CMap 的命名 CJK 字体（不嵌入）。 */
+    public func getCJKNamedFont(): ?CJKNamedFont {
+        _cjkNamedFont
     }
 
     /**
@@ -136,7 +177,17 @@ public class BaseFont {
     /**
      * 从文件路径提取字体名称
      */
-    private static func extractFontName(path: String): String {
+    private static func extractFontName(pathWithIndex: String): String {
+        // 去掉 "path,N" 的 TTC 子字体序号后缀
+        var path = pathWithIndex
+        match (pathWithIndex.lastIndexOf(",")) {
+            case Some(ci) =>
+                let suf = pathWithIndex[(ci + 1)..]
+                var allDigit = suf.size > 0
+                for (c in suf) { if (c < b'0' || c > b'9') { allDigit = false; break } }
+                if (allDigit) { path = pathWithIndex[0..ci] }
+            case None => ()
+        }
         // 特殊处理 Noto CJK 字体
         if (path.contains("NotoSansCJK")) {
             return "NotoSansCJKsc-Regular"  // 简体中文变体
@@ -179,7 +230,8 @@ public class BaseFont {
      * 检查是否使用 Unicode 编码
      */
     public func isUnicodeEncoding(): Bool {
-        encoding == IDENTITY_H || encoding == IDENTITY_V
+        // Identity-H/V 或预置 CMap 的命名 CJK 字体，都走 2 字节 Type0 输出路径
+        encoding == IDENTITY_H || encoding == IDENTITY_V || _cjkNamedFont.isSome()
     }
 
     /**
@@ -231,6 +283,18 @@ public class BaseFont {
         // 标记字符串中的字形为已使用（用于子集化）
         markStringUsed(text)
 
+        // 预置 CMap 的命名 CJK 字体：用打包的 Adobe 度量按 CID 计算宽度（否则无法正确换行）
+        match (_cjkNamedFont) {
+            case Some(cjk) =>
+                var total: Int32 = 0
+                for (r in text.runes()) {
+                    let cid = cjk.unicodeToCid(UInt32(r))
+                    total += cjk.cidWidth(cid)
+                }
+                return Float32(total) * fontSize / 1000.0
+            case None => ()
+        }
+
         match (ttfFont) {
             case Some(ttf) =>
                 return ttf.getStringWidth(text, fontSize)
@@ -250,6 +314,12 @@ public class BaseFont {
      * @return 字符宽度（以千分之一单位），如果未找到返回 0
      */
     public func getCharWidth(unicode: UInt32): Int32 {
+        // 预置 CMap 的命名 CJK 字体：用 Adobe 度量（Unicode→CID→宽度）
+        match (_cjkNamedFont) {
+            case Some(cjk) => return cjk.cidWidth(cjk.unicodeToCid(unicode))
+            case None => ()
+        }
+
         match (ttfFont) {
             case Some(ttf) =>
                 let widthInFontUnits = ttf.getCharWidth(unicode)

@@ -16,6 +16,7 @@ public class TrueTypeFont {
     private var fileName: String = ""
     private var fontData: Array<UInt8> = Array<UInt8>(0, repeat: UInt8(0))
     private var offset: Int64 = 0  // TTC 文件中的字体偏移
+    private var ttcIndex: Int64 = 0  // TTC 中要加载的子字体序号（"path,N" 指定）
 
     // 字体表
     private var tables: HashMap<String, TableEntry> = HashMap<String, TableEntry>()
@@ -48,8 +49,31 @@ public class TrueTypeFont {
      * 构造函数
      */
     public init(fontPath: String) {
-        this.fileName = fontPath
-        readFontFile(fontPath)
+        // 支持 "path,N" 选择 TTC 中第 N 个子字体（与 OpenPDF 一致）
+        var realPath = fontPath
+        var idx: Int64 = 0
+        match (fontPath.lastIndexOf(",")) {
+            case Some(ci) =>
+                let suffix = fontPath[(ci + 1)..]
+                var allDigit = suffix.size > 0
+                var n: Int64 = 0
+                for (c in suffix) {
+                    if (c >= b'0' && c <= b'9') {
+                        n = n * 10 + Int64(c - b'0')
+                    } else {
+                        allDigit = false
+                        break
+                    }
+                }
+                if (allDigit) {
+                    realPath = fontPath[0..ci]
+                    idx = n
+                }
+            case None => ()
+        }
+        this.fileName = realPath
+        this.ttcIndex = idx
+        readFontFile(realPath)
     }
 
     /**
@@ -58,42 +82,9 @@ public class TrueTypeFont {
      */
     private func readFontFile(path: String): Unit {
         try {
-            let file = File(Path(path), OpenMode.Read)
-
-            // 使用 64KB 缓冲区批量读取整个文件
-            let bufferSize: Int64 = 65536    // 64KB 缓冲区
-            let buffer = Array<UInt8>(bufferSize, repeat: UInt8(0))
-
-            var chunks = ArrayList<Array<UInt8>>()
-            var totalRead: Int64 = 0
-
-            while (true) {
-                let bytesRead = file.read(buffer)
-                if (bytesRead <= 0) {
-                    break
-                }
-
-                // 复制这一块
-                let chunk = Array<UInt8>(bytesRead, repeat: UInt8(0))
-                for (i in 0..bytesRead) {
-                    chunk[i] = buffer[i]
-                }
-                chunks.add(chunk)
-                totalRead += bytesRead
-            }
-
-            file.close()
-
-            // 合并所有块
-            fontData = Array<UInt8>(totalRead, repeat: UInt8(0))
-            var offset: Int64 = 0
-            for (chunkIndex in 0..chunks.size) {
-                let chunk = chunks[chunkIndex]
-                for (i in 0..chunk.size) {
-                    fontData[offset + i] = chunk[i]
-                }
-                offset += chunk.size
-            }
+            // 一次性读入整个文件：单次精确分配，避免分块缓冲 + 合并造成的临时内存翻倍
+            // （CJK 字体可达 19MB，旧的分块合并会瞬时占用 ~2 倍体积的临时垃圾）。
+            fontData = File.readFrom(path)
 
             // 解析字体
             parseFontTables()
@@ -137,8 +128,9 @@ public class TrueTypeFont {
         let numFonts = readUInt32(currentPos)
         currentPos += 4
 
-        // 读取第一个字体的偏移（简化：只使用第一个字体）
-        this.offset = Int64(readUInt32(currentPos))
+        // 选择第 ttcIndex 个子字体（越界回退到 0）
+        let useIdx = if (ttcIndex >= 0 && Int64(ttcIndex) < Int64(numFonts)) { ttcIndex } else { 0 }
+        this.offset = Int64(readUInt32(currentPos + useIdx * 4))
 
         // 解析该字体
         parseTTF(this.offset)

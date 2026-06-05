@@ -43,7 +43,9 @@ let SECTIONS: Array<(String, () -> Unit)> = [
     ("S20_Security",       { => s20_security() }),
     ("S21_ColumnText",     { => s21_columnText() }),
     ("S22_Chapter",        { => s22_chapter() }),
-    ("S23_Metadata",       { => s23_metadata() })
+    ("S23_Metadata",       { => s23_metadata() }),
+    ("S24_FontRegistry",   { => s24_fontRegistry() }),
+    ("S25_CJKCMap",        { => s25_cjkCMap() })
 ]
 
 func runOne(name: String, run: () -> Unit): Bool {

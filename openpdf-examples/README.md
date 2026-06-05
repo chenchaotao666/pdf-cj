@@ -49,6 +49,11 @@ java -jar target/pdf-compare-1.0-SNAPSHOT-jar-with-dependencies.jar 7
 | `S21_ColumnText` | ColumnText 多列排版 | `java_s21_column_text.pdf` |
 | `S22_Chapter` | Chapter / Section 章节 | `java_s22_chapter.pdf` |
 | `S23_Metadata` | 元数据与版本 | `java_s23_metadata.pdf` |
-| `RunAllSections` | 批量运行全部 23 个模块 | 所有上述 PDF |
+| `S24_FontRegistry` | FontFactory.registerDirectories 按名加载 | `java_s24_font_registry.pdf` |
+| `S25_CJKCMap` | 预置 CMap 命名 CJK 字体（不嵌入） | `java_s25_cjk_cmap.pdf` |
+| `RunAllSections` | 批量运行全部模块 | 所有上述 PDF |
+
+> S25 的预置 CMap CJK 字体依赖 Adobe CMap/度量资源（Adobe-BSD 许可），已打包在
+> `src/main/resources/com/lowagie/text/pdf/fonts/cmaps/`（OpenPDF 核心 jar 不含此数据）。
 
 ---
